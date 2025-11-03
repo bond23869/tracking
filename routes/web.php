@@ -34,6 +34,11 @@ Route::middleware(['auth', 'verified', 'organization'])->group(function () {
     Route::post('websites/{website}/ingestion-tokens/{ingestionToken}/revoke', [\App\Http\Controllers\Base\IngestionTokenController::class, 'revoke'])->name('websites.ingestion-tokens.revoke');
     Route::post('websites/{website}/ingestion-tokens/{ingestionToken}/restore', [\App\Http\Controllers\Base\IngestionTokenController::class, 'restore'])->name('websites.ingestion-tokens.restore');
 
+    // Pixel management routes
+    Route::post('websites/{website}/pixels', [\App\Http\Controllers\Base\WebsitePixelController::class, 'store'])->name('websites.pixels.store');
+    Route::patch('websites/{website}/pixels/{pixel}', [\App\Http\Controllers\Base\WebsitePixelController::class, 'update'])->name('websites.pixels.update');
+    Route::delete('websites/{website}/pixels/{pixel}', [\App\Http\Controllers\Base\WebsitePixelController::class, 'destroy'])->name('websites.pixels.destroy');
+
     // Team management routes (require permission to manage team)
     Route::middleware('permission:manage team')->group(function () {
         Route::get('users', [InvitationsController::class, 'index'])->name('users.index');

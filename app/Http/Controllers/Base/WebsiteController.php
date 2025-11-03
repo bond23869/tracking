@@ -100,8 +100,8 @@ class WebsiteController extends Controller
             abort(404, 'Website not found in your organization.');
         }
 
-        // Load ingestion tokens
-        $website->load('ingestionTokens');
+        // Load ingestion tokens and pixels
+        $website->load('ingestionTokens', 'pixels');
 
         // Get new token from flash session if present
         $newToken = session('new_token');
@@ -129,6 +129,26 @@ class WebsiteController extends Controller
                         'revoked_at' => $token->revoked_at?->toISOString(),
                         'is_revoked' => $token->revoked_at !== null,
                         'created_at' => $token->created_at->toISOString(),
+                    ];
+                })->values(),
+                'pixels' => $website->pixels->map(function ($pixel) {
+                    return [
+                        'id' => $pixel->id,
+                        'platform' => $pixel->platform,
+                        'name' => $pixel->name,
+                        'is_active' => $pixel->is_active,
+                        'pixel_id' => $pixel->pixel_id,
+                        'access_token' => $pixel->access_token,
+                        'conversion_id' => $pixel->conversion_id,
+                        'conversion_labels' => $pixel->conversion_labels,
+                        'tag_id' => $pixel->tag_id,
+                        'ad_account_id' => $pixel->ad_account_id,
+                        'snapchat_pixel_id' => $pixel->snapchat_pixel_id,
+                        'event_ids' => $pixel->event_ids,
+                        'public_api_key' => $pixel->public_api_key,
+                        'private_api_key' => $pixel->private_api_key,
+                        'created_at' => $pixel->created_at->toISOString(),
+                        'updated_at' => $pixel->updated_at->toISOString(),
                     ];
                 })->values(),
                 'new_token' => $newToken,

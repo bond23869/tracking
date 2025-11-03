@@ -28,6 +28,11 @@ class Website extends Model
         return $this->hasMany(IngestionToken::class);
     }
 
+    public function pixels(): HasMany
+    {
+        return $this->hasMany(WebsitePixel::class);
+    }
+
     /**
      * Scope to exclude archived websites.
      */

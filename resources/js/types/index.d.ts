@@ -26,6 +26,8 @@ export interface SharedData {
     name: string;
     quote: { message: string; author: string };
     auth: Auth;
+    currentAccount: Account | null;
+    accounts: Account[];
     sidebarOpen: boolean;
     [key: string]: unknown;
 }
@@ -40,4 +42,14 @@ export interface User {
     created_at: string;
     updated_at: string;
     [key: string]: unknown; // This allows for additional properties...
+}
+
+export interface Account {
+    id: number;
+    name: string;
+    slug: string;
+    archived_at?: string | null;
+    is_archived?: boolean;
+    created_at?: string;
+    updated_at?: string;
 }

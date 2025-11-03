@@ -1,6 +1,7 @@
 import { NavFooter } from '@/components/nav-footer';
 import { NavMain } from '@/components/nav-main';
 import { NavUser } from '@/components/nav-user';
+import { AccountSelector } from '@/components/account-selector';
 import {
     Sidebar,
     SidebarContent,
@@ -44,6 +45,7 @@ export function AppSidebar() {
                         </SidebarMenuButton>
                     </SidebarMenuItem>
                 </SidebarMenu>
+                <AccountSelector />
             </SidebarHeader>
 
             <SidebarContent>

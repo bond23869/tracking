@@ -13,6 +13,13 @@ Route::middleware(['auth', 'verified', 'organization'])->group(function () {
         return Inertia::render('dashboard');
     })->name('dashboard');
 
+    // Account management routes
+    Route::get('accounts', [\App\Http\Controllers\Base\AccountController::class, 'index'])->name('accounts.index');
+    Route::post('accounts', [\App\Http\Controllers\Base\AccountController::class, 'store'])->name('accounts.store');
+    Route::patch('accounts/{account}', [\App\Http\Controllers\Base\AccountController::class, 'update'])->name('accounts.update');
+    Route::post('accounts/{account}/archive', [\App\Http\Controllers\Base\AccountController::class, 'archive'])->name('accounts.archive');
+    Route::post('accounts/{account}/switch', [\App\Http\Controllers\Base\AccountController::class, 'switch'])->name('accounts.switch');
+
     // Team management routes (require permission to manage team)
     Route::middleware('permission:manage team')->group(function () {
         Route::get('users', [InvitationsController::class, 'index'])->name('users.index');

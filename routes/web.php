@@ -20,6 +20,9 @@ Route::middleware(['auth', 'verified', 'organization'])->group(function () {
     Route::post('accounts/{account}/archive', [\App\Http\Controllers\Base\AccountController::class, 'archive'])->name('accounts.archive');
     Route::post('accounts/{account}/switch', [\App\Http\Controllers\Base\AccountController::class, 'switch'])->name('accounts.switch');
 
+    // Website management routes
+    Route::get('websites', [\App\Http\Controllers\Base\WebsiteController::class, 'index'])->name('websites.index');
+
     // Team management routes (require permission to manage team)
     Route::middleware('permission:manage team')->group(function () {
         Route::get('users', [InvitationsController::class, 'index'])->name('users.index');

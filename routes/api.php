@@ -19,6 +19,12 @@ Route::prefix('tracking')->name('tracking.')->group(function () {
     // Health check endpoint (no auth required)
     Route::get('health', [TrackingController::class, 'health'])->name('health');
 
+    // Token validation endpoint (protected by ingestion token)
+    // Returns 200 if token is valid, 401 if invalid
+    Route::get('validate', [TrackingController::class, 'validateToken'])
+        ->middleware(AuthenticateIngestionToken::class)
+        ->name('validate');
+
     // Tracking event ingestion endpoint (protected by ingestion token)
     Route::post('events', [TrackingController::class, 'track'])
         ->middleware(AuthenticateIngestionToken::class)

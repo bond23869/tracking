@@ -28,6 +28,12 @@ Route::middleware(['auth', 'verified', 'organization'])->group(function () {
     Route::post('websites/{website}/archive', [\App\Http\Controllers\Base\WebsiteController::class, 'archive'])->name('websites.archive');
     Route::post('websites/{website}/unarchive', [\App\Http\Controllers\Base\WebsiteController::class, 'unarchive'])->name('websites.unarchive');
 
+    // Ingestion token management routes
+    Route::post('websites/{website}/ingestion-tokens', [\App\Http\Controllers\Base\IngestionTokenController::class, 'store'])->name('websites.ingestion-tokens.store');
+    Route::delete('websites/{website}/ingestion-tokens/{ingestionToken}', [\App\Http\Controllers\Base\IngestionTokenController::class, 'destroy'])->name('websites.ingestion-tokens.destroy');
+    Route::post('websites/{website}/ingestion-tokens/{ingestionToken}/revoke', [\App\Http\Controllers\Base\IngestionTokenController::class, 'revoke'])->name('websites.ingestion-tokens.revoke');
+    Route::post('websites/{website}/ingestion-tokens/{ingestionToken}/restore', [\App\Http\Controllers\Base\IngestionTokenController::class, 'restore'])->name('websites.ingestion-tokens.restore');
+
     // Team management routes (require permission to manage team)
     Route::middleware('permission:manage team')->group(function () {
         Route::get('users', [InvitationsController::class, 'index'])->name('users.index');

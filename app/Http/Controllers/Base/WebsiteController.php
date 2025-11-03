@@ -100,6 +100,12 @@ class WebsiteController extends Controller
             abort(404, 'Website not found in your organization.');
         }
 
+        // Load ingestion tokens
+        $website->load('ingestionTokens');
+
+        // Get new token from flash session if present
+        $newToken = session('new_token');
+
         return Inertia::render('websites/show', [
             'website' => [
                 'id' => $website->id,
@@ -113,6 +119,19 @@ class WebsiteController extends Controller
                 'is_archived' => $website->isArchived(),
                 'created_at' => $website->created_at->toISOString(),
                 'updated_at' => $website->updated_at->toISOString(),
+                'ingestion_tokens' => $website->ingestionTokens->map(function ($token) {
+                    return [
+                        'id' => $token->id,
+                        'name' => $token->name,
+                        'token_prefix' => $token->token_prefix,
+                        'last_used_at' => $token->last_used_at?->toISOString(),
+                        'expires_at' => $token->expires_at?->toISOString(),
+                        'revoked_at' => $token->revoked_at?->toISOString(),
+                        'is_revoked' => $token->revoked_at !== null,
+                        'created_at' => $token->created_at->toISOString(),
+                    ];
+                })->values(),
+                'new_token' => $newToken,
             ],
         ]);
     }

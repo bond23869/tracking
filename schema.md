@@ -216,7 +216,7 @@ The application uses the Spatie Permission package for role-based access control
 - Has many `Conversions`
 - Has many `LandingPages`
 - Has many `ReferrerDomains`
-- Has many `UtmSources`, `UtmMediums`, `UtmCampaigns`, `UtmTerms`, `UtmContents`
+- Has many `CustomUtmParameters`
 - Has many `Funnels`
 - Has many `WebsitePixels`
 
@@ -337,11 +337,6 @@ The application uses the Spatie Permission package for role-based access control
 | `duration_ms` | unsigned integer | Nullable | Session duration in milliseconds |
 | `landing_page_id` | bigint | Foreign Key, Nullable | Reference to landing page |
 | `referrer_domain_id` | bigint | Foreign Key, Nullable | Reference to referrer domain |
-| `utm_source_id` | bigint | Foreign Key, Nullable | UTM source reference |
-| `utm_medium_id` | bigint | Foreign Key, Nullable | UTM medium reference |
-| `utm_campaign_id` | bigint | Foreign Key, Nullable | UTM campaign reference |
-| `utm_term_id` | bigint | Foreign Key, Nullable | UTM term reference |
-| `utm_content_id` | bigint | Foreign Key, Nullable | UTM content reference |
 | `landing_url` | text | Nullable | Full landing URL |
 | `referrer_url` | text | Nullable | Full referrer URL |
 | `ip` | string(45) | Nullable | Client IP address |
@@ -360,6 +355,7 @@ The application uses the Spatie Permission package for role-based access control
 - Belongs to one `Customer`
 - Belongs to one `LandingPage` (nullable)
 - Belongs to one `ReferrerDomain` (nullable)
+- Belongs to many `CustomUtmValues` (via session_custom_utm_values)
 - Has many `Events`
 - Has many `Touches`
 - Has many `Conversions`
@@ -383,11 +379,6 @@ The application uses the Spatie Permission package for role-based access control
 | `ingestion_token_id` | bigint | Foreign Key, Nullable | Token used for ingestion |
 | `schema_version` | unsigned integer | Default: 1 | Event schema version |
 | `sdk_version` | string | Nullable | SDK version |
-| `utm_source_id` | bigint | Foreign Key, Nullable | UTM source reference |
-| `utm_medium_id` | bigint | Foreign Key, Nullable | UTM medium reference |
-| `utm_campaign_id` | bigint | Foreign Key, Nullable | UTM campaign reference |
-| `utm_term_id` | bigint | Foreign Key, Nullable | UTM term reference |
-| `utm_content_id` | bigint | Foreign Key, Nullable | UTM content reference |
 | `referrer_domain_id` | bigint | Foreign Key, Nullable | Referrer domain reference |
 | `landing_page_id` | bigint | Foreign Key, Nullable | Landing page reference |
 | `created_at` | timestamp | Auto | Record creation timestamp |
@@ -404,6 +395,7 @@ The application uses the Spatie Permission package for role-based access control
 - Belongs to one `Session` (nullable)
 - Belongs to one `Customer` (nullable)
 - Belongs to one `IngestionToken` (nullable)
+- Belongs to many `CustomUtmValues` (via event_custom_utm_values)
 - Has one `EventDedupKey`
 - Has one `Conversion` (if conversion event)
 
@@ -433,11 +425,6 @@ The application uses the Spatie Permission package for role-based access control
 | `session_id` | bigint | Foreign Key, Nullable | Reference to session |
 | `occurred_at` | timestamp | Required | Touch timestamp |
 | `type` | string | Required | Touch type (landing, ad_click, email_open, etc.) |
-| `utm_source_id` | bigint | Foreign Key, Nullable | UTM source reference |
-| `utm_medium_id` | bigint | Foreign Key, Nullable | UTM medium reference |
-| `utm_campaign_id` | bigint | Foreign Key, Nullable | UTM campaign reference |
-| `utm_term_id` | bigint | Foreign Key, Nullable | UTM term reference |
-| `utm_content_id` | bigint | Foreign Key, Nullable | UTM content reference |
 | `referrer_domain_id` | bigint | Foreign Key, Nullable | Referrer domain reference |
 | `landing_page_id` | bigint | Foreign Key, Nullable | Landing page reference |
 | `source_event_id` | bigint | Foreign Key, Nullable | Source event reference |
@@ -452,6 +439,7 @@ The application uses the Spatie Permission package for role-based access control
 - Belongs to one `Website`
 - Belongs to one `Customer`
 - Belongs to one `Session` (nullable)
+- Belongs to many `CustomUtmValues` (via touch_custom_utm_values)
 - Has many `Conversions` (as first_touch, last_non_direct_touch, or attributed_touch)
 
 ### Conversions Table
@@ -540,44 +528,119 @@ The application uses the Spatie Permission package for role-based access control
 - Has many `Events`
 - Has many `Touches`
 
-### UTM Parameter Tables
+### Custom UTM Parameter Tables
 
-**Purpose**: Normalized storage of UTM parameters (source, medium, campaign, term, content).
+**Purpose**: Flexible storage for any custom UTM parameters (e.g., utm_burek, utm_custom1, etc.) beyond the standard five.
 
-#### Utm Sources Table
+#### Custom Utm Parameters Table
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
-| `id` | bigint | Primary Key, Auto Increment | Unique UTM source identifier |
+| `id` | bigint | Primary Key, Auto Increment | Unique parameter identifier |
 | `website_id` | bigint | Foreign Key, Cascade Delete | Reference to website |
-| `value` | string | Required | UTM source value |
+| `name` | string | Required | Parameter name (e.g., 'burek', 'custom1') |
 | `first_seen_at` | timestamp | Nullable | First appearance timestamp |
 | `created_at` | timestamp | Auto | Record creation timestamp |
 | `updated_at` | timestamp | Auto | Record update timestamp |
 
-**Unique Constraint**: `(website_id, value)`
+**Unique Constraint**: `(website_id, name)`
 
-#### Utm Mediums Table
+**Indexes**:
+- `(website_id)` - Fast lookup by website
 
-Same structure as Utm Sources, but for UTM medium values.
-
-#### Utm Campaigns Table
-
-Same structure as Utm Sources, but for UTM campaign values.
-
-#### Utm Terms Table
-
-Same structure as Utm Sources, but for UTM term values.
-
-#### Utm Contents Table
-
-Same structure as Utm Sources, but for UTM content values.
-
-**Relationships** (all UTM tables):
+**Relationships**:
 - Belongs to one `Website`
-- Has many `Sessions`
-- Has many `Events`
-- Has many `Touches`
+- Has many `CustomUtmValues`
+
+#### Custom Utm Values Table
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | bigint | Primary Key, Auto Increment | Unique value identifier |
+| `custom_utm_parameter_id` | bigint | Foreign Key, Cascade Delete | Reference to custom UTM parameter |
+| `website_id` | bigint | Foreign Key, Cascade Delete | Reference to website |
+| `value` | string | Required | Parameter value |
+| `first_seen_at` | timestamp | Nullable | First appearance timestamp |
+| `created_at` | timestamp | Auto | Record creation timestamp |
+| `updated_at` | timestamp | Auto | Record update timestamp |
+
+**Unique Constraint**: `(custom_utm_parameter_id, website_id, value)`
+
+**Indexes**:
+- `(website_id, custom_utm_parameter_id)` - Fast lookup by website and parameter
+
+**Relationships**:
+- Belongs to one `CustomUtmParameter`
+- Belongs to one `Website`
+- Belongs to many `Sessions` (via session_custom_utm_values)
+- Belongs to many `Events` (via event_custom_utm_values)
+- Belongs to many `Touches` (via touch_custom_utm_values)
+
+#### Session Custom Utm Values Table
+
+**Purpose**: Junction table linking sessions to custom UTM values.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | bigint | Primary Key, Auto Increment | Unique link identifier |
+| `session_id` | bigint | Foreign Key, Cascade Delete | Reference to session |
+| `custom_utm_value_id` | bigint | Foreign Key, Cascade Delete | Reference to custom UTM value |
+| `created_at` | timestamp | Auto | Record creation timestamp |
+| `updated_at` | timestamp | Auto | Record update timestamp |
+
+**Unique Constraint**: `(session_id, custom_utm_value_id)`
+
+**Indexes**:
+- `(session_id)` - Fast lookup by session
+- `(custom_utm_value_id)` - Fast lookup by value
+
+**Relationships**:
+- Belongs to one `Session`
+- Belongs to one `CustomUtmValue`
+
+#### Event Custom Utm Values Table
+
+**Purpose**: Junction table linking events to custom UTM values.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | bigint | Primary Key, Auto Increment | Unique link identifier |
+| `event_id` | bigint | Foreign Key, Cascade Delete | Reference to event |
+| `custom_utm_value_id` | bigint | Foreign Key, Cascade Delete | Reference to custom UTM value |
+| `created_at` | timestamp | Auto | Record creation timestamp |
+| `updated_at` | timestamp | Auto | Record update timestamp |
+
+**Unique Constraint**: `(event_id, custom_utm_value_id)`
+
+**Indexes**:
+- `(event_id)` - Fast lookup by event
+- `(custom_utm_value_id)` - Fast lookup by value
+
+**Relationships**:
+- Belongs to one `Event`
+- Belongs to one `CustomUtmValue`
+
+#### Touch Custom Utm Values Table
+
+**Purpose**: Junction table linking touches to custom UTM values.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | bigint | Primary Key, Auto Increment | Unique link identifier |
+| `touch_id` | bigint | Foreign Key, Cascade Delete | Reference to touch |
+| `custom_utm_value_id` | bigint | Foreign Key, Cascade Delete | Reference to custom UTM value |
+| `created_at` | timestamp | Auto | Record creation timestamp |
+| `updated_at` | timestamp | Auto | Record update timestamp |
+
+**Unique Constraint**: `(touch_id, custom_utm_value_id)`
+
+**Indexes**:
+- `(touch_id)` - Fast lookup by touch
+- `(custom_utm_value_id)` - Fast lookup by value
+
+**Relationships**:
+- Belongs to one `Touch`
+- Belongs to one `CustomUtmValue`
 
 ### Funnels Table
 
@@ -851,11 +914,16 @@ ReferrerDomains
 ├── has_many: Events
 └── has_many: Touches
 
-UtmSources, UtmMediums, UtmCampaigns, UtmTerms, UtmContents
+CustomUtmParameters
 ├── belongs_to: Website
-├── has_many: Sessions
-├── has_many: Events
-└── has_many: Touches
+└── has_many: CustomUtmValues
+
+CustomUtmValues
+├── belongs_to: CustomUtmParameter
+├── belongs_to: Website
+├── belongs_to_many: Sessions (via session_custom_utm_values)
+├── belongs_to_many: Events (via event_custom_utm_values)
+└── belongs_to_many: Touches (via touch_custom_utm_values)
 
 Funnels
 ├── belongs_to: Website
@@ -947,6 +1015,7 @@ Permissions
 - Custom attribution models
 - Multi-touch attribution support (with weights)
 - Touch tracking for marketing campaigns
+- Custom UTM parameter tracking for flexible attribution analysis
 
 ### Conversion Analysis
 - Conversion event tracking
@@ -994,25 +1063,27 @@ The migrations should be run in the following order (as indicated by timestamps)
 ### Tracking Dimensions
 16. `2025_11_01_121400_create_landing_pages_table.php` - Landing page tracking
 17. `2025_11_01_121300_create_referrer_domains_table.php` - Referrer tracking
-18. `2025_11_01_121500_create_utm_sources_table.php` - UTM source tracking
-19. `2025_11_01_121510_create_utm_mediums_table.php` - UTM medium tracking
-20. `2025_11_01_121520_create_utm_campaigns_table.php` - UTM campaign tracking
-21. `2025_11_01_121530_create_utm_terms_table.php` - UTM term tracking
-22. `2025_11_01_121540_create_utm_contents_table.php` - UTM content tracking
 
 ### Core Tracking Events
-23. `2025_11_01_121600_create_sessions_table.php` - Session tracking
-24. `2025_11_01_121700_create_events_table.php` - Event tracking
-25. `2025_11_01_121800_create_touches_table.php` - Marketing touch tracking
-26. `2025_11_01_121900_create_conversions_table.php` - Conversion tracking
+18. `2025_11_01_121600_create_sessions_table.php` - Session tracking
+19. `2025_11_01_121700_create_events_table.php` - Event tracking
+20. `2025_11_01_121800_create_touches_table.php` - Marketing touch tracking
+21. `2025_11_01_121900_create_conversions_table.php` - Conversion tracking
+
+### Custom UTM Parameters
+22. `2025_11_01_122400_create_custom_utm_parameters_table.php` - Custom UTM parameter definitions
+23. `2025_11_01_122410_create_custom_utm_values_table.php` - Custom UTM value storage
+24. `2025_11_01_122420_create_session_custom_utm_values_table.php` - Session custom UTM junction
+25. `2025_11_01_122430_create_event_custom_utm_values_table.php` - Event custom UTM junction
+26. `2025_11_01_122440_create_touch_custom_utm_values_table.php` - Touch custom UTM junction
 
 ### Analysis & Monitoring
-27. `2025_11_01_122000_create_funnels_table.php` - Funnel analysis
-28. `2025_11_01_122100_create_funnel_steps_table.php` - Funnel step definitions
-29. `2025_11_01_122200_create_event_dedup_keys_table.php` - Event deduplication
-30. `2025_11_01_122300_create_token_usages_table.php` - Token usage monitoring
+28. `2025_11_01_122000_create_funnels_table.php` - Funnel analysis
+29. `2025_11_01_122100_create_funnel_steps_table.php` - Funnel step definitions
+30. `2025_11_01_122200_create_event_dedup_keys_table.php` - Event deduplication
+31. `2025_11_01_122300_create_token_usages_table.php` - Token usage monitoring
 
 ### Updates
-31. `2025_11_03_092236_add_archived_at_to_accounts_table.php` - Account archival
+32. `2025_11_03_092236_add_archived_at_to_accounts_table.php` - Account archival
 
 This order ensures proper foreign key relationships and dependencies are maintained.

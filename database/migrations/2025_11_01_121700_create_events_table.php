@@ -28,12 +28,7 @@ return new class extends Migration
             $table->unsignedInteger('schema_version')->default(1);
             $table->string('sdk_version')->nullable();
 
-            // Optional UTM/landing snapshots for faster joins
-            $table->foreignId('utm_source_id')->nullable()->constrained('utm_sources')->nullOnDelete();
-            $table->foreignId('utm_medium_id')->nullable()->constrained('utm_mediums')->nullOnDelete();
-            $table->foreignId('utm_campaign_id')->nullable()->constrained('utm_campaigns')->nullOnDelete();
-            $table->foreignId('utm_term_id')->nullable()->constrained('utm_terms')->nullOnDelete();
-            $table->foreignId('utm_content_id')->nullable()->constrained('utm_contents')->nullOnDelete();
+            // Optional landing/referrer snapshots for faster joins
             $table->foreignId('referrer_domain_id')->nullable()->constrained('referrer_domains')->nullOnDelete();
             $table->foreignId('landing_page_id')->nullable()->constrained('landing_pages')->nullOnDelete();
 

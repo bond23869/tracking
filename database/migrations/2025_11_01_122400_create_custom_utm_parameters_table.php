@@ -11,14 +11,15 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('utm_mediums', function (Blueprint $table) {
+        Schema::create('custom_utm_parameters', function (Blueprint $table) {
             $table->id();
             $table->foreignId('website_id')->constrained()->onDelete('cascade');
-            $table->string('value');
+            $table->string('name'); // e.g., 'burek', 'custom1', etc.
             $table->timestamp('first_seen_at')->nullable();
             $table->timestamps();
 
-            $table->unique(['website_id', 'value']);
+            $table->unique(['website_id', 'name']);
+            $table->index(['website_id']);
         });
     }
 
@@ -27,8 +28,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('utm_mediums');
+        Schema::dropIfExists('custom_utm_parameters');
     }
 };
-
-

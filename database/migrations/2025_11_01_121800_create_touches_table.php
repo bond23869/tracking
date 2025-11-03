@@ -19,12 +19,6 @@ return new class extends Migration
             $table->timestamp('occurred_at');
             $table->string('type'); // landing, ad_click, email_open, etc.
 
-            $table->foreignId('utm_source_id')->nullable()->constrained('utm_sources')->nullOnDelete();
-            $table->foreignId('utm_medium_id')->nullable()->constrained('utm_mediums')->nullOnDelete();
-            $table->foreignId('utm_campaign_id')->nullable()->constrained('utm_campaigns')->nullOnDelete();
-            $table->foreignId('utm_term_id')->nullable()->constrained('utm_terms')->nullOnDelete();
-            $table->foreignId('utm_content_id')->nullable()->constrained('utm_contents')->nullOnDelete();
-
             $table->foreignId('referrer_domain_id')->nullable()->constrained('referrer_domains')->nullOnDelete();
             $table->foreignId('landing_page_id')->nullable()->constrained('landing_pages')->nullOnDelete();
 

@@ -3,16 +3,20 @@
 namespace App\Http\Controllers\Base;
 
 use App\Http\Controllers\Controller;
+use App\Models\Website;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 use Inertia\Response;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Str;
 
 class WebsiteController extends Controller
 {
     /**
      * Display a listing of the resource.
      */
-    public function index(): Response
+    public function index(Request $request): Response
     {
         $user = Auth::user();
         $organization = $user->organization;
@@ -24,6 +28,7 @@ class WebsiteController extends Controller
             return Inertia::render('websites/index', [
                 'websites' => [],
                 'currentAccount' => null,
+                'showArchived' => $request->boolean('show_archived', false),
             ]);
         }
 
@@ -35,20 +40,37 @@ class WebsiteController extends Controller
             return Inertia::render('websites/index', [
                 'websites' => [],
                 'currentAccount' => null,
+                'showArchived' => $request->boolean('show_archived', false),
             ]);
         }
 
-        $websites = $currentAccount->websites()
-            ->orderBy('created_at', 'desc')
-            ->get()
+        // Check if we should show archived websites
+        $showArchived = $request->boolean('show_archived', false);
+        
+        $websitesQuery = $currentAccount->websites();
+        
+        if ($showArchived) {
+            // Show all websites (archived and active)
+            $websitesQuery->orderBy('archived_at', 'asc')
+                ->orderBy('created_at', 'desc');
+        } else {
+            // Only show active websites
+            $websitesQuery->active()
+                ->orderBy('created_at', 'desc');
+        }
+
+        $websites = $websitesQuery->get()
             ->map(function ($website) {
                 return [
                     'id' => $website->id,
                     'name' => $website->name,
                     'url' => $website->url,
+                    'type' => $website->type,
                     'status' => $website->status,
                     'connection_status' => $website->connection_status,
                     'connection_error' => $website->connection_error,
+                    'archived_at' => $website->archived_at?->toISOString(),
+                    'is_archived' => $website->isArchived(),
                     'created_at' => $website->created_at->toISOString(),
                     'updated_at' => $website->updated_at->toISOString(),
                 ];
@@ -61,6 +83,87 @@ class WebsiteController extends Controller
                 'name' => $currentAccount->name,
                 'slug' => $currentAccount->slug,
             ],
+            'showArchived' => $showArchived,
         ]);
+    }
+
+    /**
+     * Store a newly created resource in storage.
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'type' => ['required', 'string', 'in:woocommerce,shopify'],
+            'url' => ['required', 'url', 'max:255'],
+        ]);
+
+        $user = Auth::user();
+        $organization = $user->organization;
+        
+        // Get current account from session
+        $currentAccountId = session('current_account_id');
+        
+        if (!$currentAccountId) {
+            return back()->withErrors(['error' => 'No account selected.']);
+        }
+
+        $currentAccount = $organization->accounts()
+            ->active()
+            ->find($currentAccountId);
+
+        if (!$currentAccount) {
+            return back()->withErrors(['error' => 'Account not found.']);
+        }
+
+        // Generate a name from the URL
+        $urlParts = parse_url($validated['url']);
+        $name = $urlParts['host'] ?? 'Untitled Website';
+
+        $website = $currentAccount->websites()->create([
+            'organization_id' => $organization->id,
+            'name' => $name,
+            'url' => $validated['url'],
+            'type' => $validated['type'],
+            'status' => 'active',
+            'connection_status' => 'disconnected',
+        ]);
+
+        return back()->with('success', 'Website created successfully.');
+    }
+
+    /**
+     * Archive the specified resource.
+     */
+    public function archive(Website $website): RedirectResponse
+    {
+        $user = Auth::user();
+        $organization = $user->organization;
+
+        // Ensure the website belongs to the organization
+        if ($website->organization_id !== $organization->id) {
+            abort(404, 'Website not found in your organization.');
+        }
+
+        $website->archive();
+
+        return back()->with('success', 'Website archived successfully.');
+    }
+
+    /**
+     * Unarchive the specified resource.
+     */
+    public function unarchive(Website $website): RedirectResponse
+    {
+        $user = Auth::user();
+        $organization = $user->organization;
+
+        // Ensure the website belongs to the organization
+        if ($website->organization_id !== $organization->id) {
+            abort(404, 'Website not found in your organization.');
+        }
+
+        $website->unarchive();
+
+        return back()->with('success', 'Website unarchived successfully.');
     }
 }

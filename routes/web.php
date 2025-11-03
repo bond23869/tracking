@@ -22,6 +22,9 @@ Route::middleware(['auth', 'verified', 'organization'])->group(function () {
 
     // Website management routes
     Route::get('websites', [\App\Http\Controllers\Base\WebsiteController::class, 'index'])->name('websites.index');
+    Route::post('websites', [\App\Http\Controllers\Base\WebsiteController::class, 'store'])->name('websites.store');
+    Route::post('websites/{website}/archive', [\App\Http\Controllers\Base\WebsiteController::class, 'archive'])->name('websites.archive');
+    Route::post('websites/{website}/unarchive', [\App\Http\Controllers\Base\WebsiteController::class, 'unarchive'])->name('websites.unarchive');
 
     // Team management routes (require permission to manage team)
     Route::middleware('permission:manage team')->group(function () {

@@ -24,6 +24,7 @@ Route::middleware(['auth', 'verified', 'organization'])->group(function () {
     Route::get('websites', [\App\Http\Controllers\Base\WebsiteController::class, 'index'])->name('websites.index');
     Route::post('websites', [\App\Http\Controllers\Base\WebsiteController::class, 'store'])->name('websites.store');
     Route::get('websites/{website}', [\App\Http\Controllers\Base\WebsiteController::class, 'show'])->name('websites.show');
+    Route::patch('websites/{website}', [\App\Http\Controllers\Base\WebsiteController::class, 'update'])->name('websites.update');
     Route::post('websites/{website}/archive', [\App\Http\Controllers\Base\WebsiteController::class, 'archive'])->name('websites.archive');
     Route::post('websites/{website}/unarchive', [\App\Http\Controllers\Base\WebsiteController::class, 'unarchive'])->name('websites.unarchive');
 

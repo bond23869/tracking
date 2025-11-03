@@ -118,6 +118,28 @@ class WebsiteController extends Controller
     }
 
     /**
+     * Update the specified resource in storage.
+     */
+    public function update(Request $request, Website $website): RedirectResponse
+    {
+        $user = Auth::user();
+        $organization = $user->organization;
+
+        // Ensure the website belongs to the organization
+        if ($website->organization_id !== $organization->id) {
+            abort(404, 'Website not found in your organization.');
+        }
+
+        $validated = $request->validate([
+            'status' => ['sometimes', 'string', 'in:active,inactive'],
+        ]);
+
+        $website->update($validated);
+
+        return back()->with('success', 'Website updated successfully.');
+    }
+
+    /**
      * Store a newly created resource in storage.
      */
     public function store(Request $request): RedirectResponse

@@ -17,6 +17,9 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Archive, ArchiveRestore, MoreVertical } from 'lucide-react'
 import { router } from '@inertiajs/react'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
+import { useState, useEffect } from 'react'
 
 interface Website {
   id: number
@@ -38,7 +41,13 @@ interface WebsiteShowProps {
 }
 
 export default function WebsiteShow() {
-  const { website } = usePage<WebsiteShowProps>().props
+  const { website: initialWebsite } = usePage<WebsiteShowProps>().props
+  const [website, setWebsite] = useState(initialWebsite)
+
+  // Update state when props change (e.g., after refresh)
+  useEffect(() => {
+    setWebsite(initialWebsite)
+  }, [initialWebsite])
 
   const handleArchive = () => {
     router.post(`/websites/${website.id}/archive`, {}, {
@@ -49,6 +58,19 @@ export default function WebsiteShow() {
   const handleUnarchive = () => {
     router.post(`/websites/${website.id}/unarchive`, {}, {
       preserveScroll: false,
+    })
+  }
+
+  const handleStatusToggle = (checked: boolean) => {
+    const newStatus = checked ? 'active' : 'inactive'
+    setWebsite({ ...website, status: newStatus })
+    
+    router.patch(`/websites/${website.id}`, { status: newStatus }, {
+      preserveScroll: true,
+      onError: () => {
+        // Revert on error
+        setWebsite(initialWebsite)
+      }
     })
   }
 
@@ -189,11 +211,19 @@ export default function WebsiteShow() {
                 </div>
                 
                 <div>
-                  <label className="text-sm font-medium text-muted-foreground">Status</label>
-                  <div className="mt-1">
-                    <Badge variant={getStatusBadgeVariant(website.status)}>
-                      {website.status}
-                    </Badge>
+                  <Label htmlFor="status-toggle" className="text-sm font-medium text-muted-foreground">
+                    Status
+                  </Label>
+                  <div className="mt-2 flex items-center gap-2">
+                    <Switch
+                      id="status-toggle"
+                      checked={website.status === 'active'}
+                      onCheckedChange={handleStatusToggle}
+                      disabled={website.is_archived}
+                    />
+                    <span className="text-sm text-muted-foreground">
+                      {website.status === 'active' ? 'Active' : 'Inactive'}
+                    </span>
                   </div>
                 </div>
                 

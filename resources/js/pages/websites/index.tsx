@@ -1,5 +1,5 @@
 import { Head, usePage, router, Link } from '@inertiajs/react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import AppLayout from '@/layouts/app-layout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -8,19 +8,14 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { formatDistanceToNow } from 'date-fns'
-import { Globe, Plus, Check, Archive, ArchiveRestore, MoreVertical } from 'lucide-react'
+import { Globe, Plus, Check } from 'lucide-react'
 import { Icon } from '@/components/icon'
 import { cn } from '@/lib/utils'
 import WooCommerceIcon from '@/components/icons/woocommerce-icon'
 import ShopifyIcon from '@/components/icons/shopify-icon'
 import InputError from '@/components/input-error'
 import { Checkbox } from '@/components/ui/checkbox'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+import { Switch } from '@/components/ui/switch'
 
 interface Website {
   id: number
@@ -50,7 +45,8 @@ interface WebsitePageProps {
 }
 
 export default function WebsitesIndex() {
-  const { websites, currentAccount, showArchived = false } = usePage<WebsitePageProps>().props
+  const { websites: initialWebsites, currentAccount, showArchived = false } = usePage<WebsitePageProps>().props
+  const [websites, setWebsites] = useState(initialWebsites)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [form, setForm] = useState({ 
     type: 'woocommerce' as 'woocommerce' | 'shopify', 
@@ -59,6 +55,11 @@ export default function WebsitesIndex() {
   const [processing, setProcessing] = useState(false)
   const [urlError, setUrlError] = useState<string | null>(null)
 
+  // Update state when props change (e.g., after refresh)
+  useEffect(() => {
+    setWebsites(initialWebsites)
+  }, [initialWebsites])
+
   const handleToggleShowArchived = (checked: boolean) => {
     router.get('/websites', { show_archived: checked ? '1' : '0' }, {
       preserveState: true,
@@ -66,25 +67,20 @@ export default function WebsitesIndex() {
     })
   }
 
-  const handleArchive = (websiteId: number) => {
-    router.post(`/websites/${websiteId}/archive`, {}, {
+  const handleStatusToggle = (websiteId: number, checked: boolean) => {
+    const newStatus = checked ? 'active' : 'inactive'
+    
+    // Optimistically update the UI
+    setWebsites(websites.map(w => 
+      w.id === websiteId ? { ...w, status: newStatus } : w
+    ))
+    
+    router.patch(`/websites/${websiteId}`, { status: newStatus }, {
       preserveScroll: true,
-      onSuccess: () => {
-        // If showing archived websites, refresh to update the list
-        if (showArchived) {
-          router.reload({ only: ['websites'] })
-        }
-      },
-    })
-  }
-
-  const handleUnarchive = (websiteId: number) => {
-    router.post(`/websites/${websiteId}/unarchive`, {}, {
-      preserveScroll: true,
-      onSuccess: () => {
-        // Refresh to update the list
-        router.reload({ only: ['websites'] })
-      },
+      onError: () => {
+        // Revert on error
+        setWebsites(initialWebsites)
+      }
     })
   }
 
@@ -471,46 +467,19 @@ export default function WebsitesIndex() {
                                 </span>
                               </div>
                             </div>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  className="h-8 w-8 flex-shrink-0"
-                                  onClick={(e) => {
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                  }}
-                                >
-                                  <Icon iconNode={MoreVertical} className="h-4 w-4" />
-                                  <span className="sr-only">Open menu</span>
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                {website.is_archived ? (
-                                  <DropdownMenuItem onClick={(e) => {
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    handleUnarchive(website.id)
-                                  }}>
-                                    <Icon iconNode={ArchiveRestore} className="mr-2 h-4 w-4" />
-                                    Unarchive
-                                  </DropdownMenuItem>
-                                ) : (
-                                  <DropdownMenuItem 
-                                    onClick={(e) => {
-                                      e.preventDefault()
-                                      e.stopPropagation()
-                                      handleArchive(website.id)
-                                    }}
-                                    variant="destructive"
-                                  >
-                                    <Icon iconNode={Archive} className="mr-2 h-4 w-4" />
-                                    Archive
-                                  </DropdownMenuItem>
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                            <div 
+                              className="flex items-center gap-2"
+                              onClick={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                              }}
+                            >
+                              <Switch
+                                checked={website.status === 'active'}
+                                onCheckedChange={(checked) => handleStatusToggle(website.id, checked)}
+                                disabled={website.is_archived}
+                              />
+                            </div>
                           </div>
                         </CardHeader>
                         <CardContent className="pt-0">
@@ -522,9 +491,6 @@ export default function WebsitesIndex() {
                             )}
                             
                             <div className="flex flex-wrap items-center gap-2">
-                              <Badge variant={getStatusBadgeVariant(website.status)}>
-                                {website.status}
-                              </Badge>
                               <Badge variant={getConnectionStatusBadgeVariant(website.connection_status)}>
                                 {website.connection_status}
                               </Badge>

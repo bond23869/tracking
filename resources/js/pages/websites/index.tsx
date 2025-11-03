@@ -417,12 +417,6 @@ export default function WebsitesIndex() {
 
             {/* Websites List */}
             <div className="space-y-4">
-              <div>
-                <h2 className="text-2xl font-semibold tracking-tight">Websites ({websites.length})</h2>
-                <p className="text-muted-foreground">
-                  All websites under {currentAccount.name}
-                </p>
-              </div>
               
               {websites.length === 0 ? (
                 <Card>

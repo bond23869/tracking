@@ -1,4 +1,4 @@
-import { Head, usePage, router } from '@inertiajs/react'
+import { Head, usePage, router, Link } from '@inertiajs/react'
 import { useState } from 'react'
 import AppLayout from '@/layouts/app-layout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -46,6 +46,7 @@ interface WebsitePageProps {
   showArchived?: boolean
   errors?: Record<string, string>
   success?: string
+  [key: string]: unknown
 }
 
 export default function WebsitesIndex() {
@@ -433,97 +434,120 @@ export default function WebsitesIndex() {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {websites.map((website) => (
-                    <Card 
+                    <Link 
                       key={website.id}
-                      className={cn(
-                        "relative transition-all hover:shadow-md",
-                        website.is_archived && "opacity-60"
-                      )}
+                      href={`/websites/${website.id}`}
+                      className="block"
                     >
-                      <CardHeader className="pb-3">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-2">
-                              {website.type === 'woocommerce' ? (
-                                <WooCommerceIcon className="h-5 w-5 flex-shrink-0" />
-                              ) : (
-                                <ShopifyIcon className="h-5 w-5 flex-shrink-0" />
-                              )}
-                              <CardTitle className={cn(
-                                "text-lg truncate",
-                                website.is_archived && "line-through text-muted-foreground"
+                      <Card 
+                        className={cn(
+                          "relative transition-all hover:shadow-md cursor-pointer h-full",
+                          website.is_archived && "opacity-60"
+                        )}
+                      >
+                        <CardHeader className="pb-3">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-2">
+                                {website.type === 'woocommerce' ? (
+                                  <WooCommerceIcon className="h-5 w-5 flex-shrink-0" />
+                                ) : (
+                                  <ShopifyIcon className="h-5 w-5 flex-shrink-0" />
+                                )}
+                                <CardTitle className={cn(
+                                  "text-lg truncate",
+                                  website.is_archived && "line-through text-muted-foreground"
+                                )}>
+                                  {website.name}
+                                </CardTitle>
+                              </div>
+                              <div className={cn(
+                                "text-sm text-muted-foreground truncate",
+                                website.is_archived && "line-through"
                               )}>
-                                {website.name}
-                              </CardTitle>
-                            </div>
-                            <div className={cn(
-                              "text-sm text-muted-foreground truncate",
-                              website.is_archived && "line-through"
-                            )}>
-                              <a 
-                                href={website.url} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:underline dark:text-blue-400"
-                              >
-                                {website.url}
-                              </a>
-                            </div>
-                          </div>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                                <Icon iconNode={MoreVertical} className="h-4 w-4" />
-                                <span className="sr-only">Open menu</span>
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              {website.is_archived ? (
-                                <DropdownMenuItem onClick={() => handleUnarchive(website.id)}>
-                                  <Icon iconNode={ArchiveRestore} className="mr-2 h-4 w-4" />
-                                  Unarchive
-                                </DropdownMenuItem>
-                              ) : (
-                                <DropdownMenuItem 
-                                  onClick={() => handleArchive(website.id)}
-                                  variant="destructive"
+                                <span 
+                                  onClick={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    window.open(website.url, '_blank', 'noopener,noreferrer')
+                                  }}
+                                  className="text-blue-600 hover:underline dark:text-blue-400"
                                 >
-                                  <Icon iconNode={Archive} className="mr-2 h-4 w-4" />
-                                  Archive
-                                </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="pt-0">
-                        <div className="space-y-3">
-                          {website.connection_error && (
-                            <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 p-2 rounded border border-red-200 dark:border-red-800">
-                              {website.connection_error}
+                                  {website.url}
+                                </span>
+                              </div>
                             </div>
-                          )}
-                          
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant={getStatusBadgeVariant(website.status)}>
-                              {website.status}
-                            </Badge>
-                            <Badge variant={getConnectionStatusBadgeVariant(website.connection_status)}>
-                              {website.connection_status}
-                            </Badge>
-                            {website.is_archived && (
-                              <Badge variant="secondary">
-                                Archived
-                              </Badge>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="h-8 w-8 flex-shrink-0"
+                                  onClick={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                  }}
+                                >
+                                  <Icon iconNode={MoreVertical} className="h-4 w-4" />
+                                  <span className="sr-only">Open menu</span>
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                {website.is_archived ? (
+                                  <DropdownMenuItem onClick={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    handleUnarchive(website.id)
+                                  }}>
+                                    <Icon iconNode={ArchiveRestore} className="mr-2 h-4 w-4" />
+                                    Unarchive
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem 
+                                    onClick={(e) => {
+                                      e.preventDefault()
+                                      e.stopPropagation()
+                                      handleArchive(website.id)
+                                    }}
+                                    variant="destructive"
+                                  >
+                                    <Icon iconNode={Archive} className="mr-2 h-4 w-4" />
+                                    Archive
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="pt-0">
+                          <div className="space-y-3">
+                            {website.connection_error && (
+                              <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 p-2 rounded border border-red-200 dark:border-red-800">
+                                {website.connection_error}
+                              </div>
                             )}
+                            
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant={getStatusBadgeVariant(website.status)}>
+                                {website.status}
+                              </Badge>
+                              <Badge variant={getConnectionStatusBadgeVariant(website.connection_status)}>
+                                {website.connection_status}
+                              </Badge>
+                              {website.is_archived && (
+                                <Badge variant="secondary">
+                                  Archived
+                                </Badge>
+                              )}
+                            </div>
+                            
+                            <div className="text-xs text-muted-foreground pt-2 border-t">
+                              Created {formatDistanceToNow(new Date(website.created_at), { addSuffix: true })}
+                            </div>
                           </div>
-                          
-                          <div className="text-xs text-muted-foreground pt-2 border-t">
-                            Created {formatDistanceToNow(new Date(website.created_at), { addSuffix: true })}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
+                        </CardContent>
+                      </Card>
+                    </Link>
                   ))}
                 </div>
               )}

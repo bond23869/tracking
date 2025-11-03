@@ -88,6 +88,36 @@ class WebsiteController extends Controller
     }
 
     /**
+     * Display the specified resource.
+     */
+    public function show(Website $website): Response
+    {
+        $user = Auth::user();
+        $organization = $user->organization;
+
+        // Ensure the website belongs to the organization
+        if ($website->organization_id !== $organization->id) {
+            abort(404, 'Website not found in your organization.');
+        }
+
+        return Inertia::render('websites/show', [
+            'website' => [
+                'id' => $website->id,
+                'name' => $website->name,
+                'url' => $website->url,
+                'type' => $website->type,
+                'status' => $website->status,
+                'connection_status' => $website->connection_status,
+                'connection_error' => $website->connection_error,
+                'archived_at' => $website->archived_at?->toISOString(),
+                'is_archived' => $website->isArchived(),
+                'created_at' => $website->created_at->toISOString(),
+                'updated_at' => $website->updated_at->toISOString(),
+            ],
+        ]);
+    }
+
+    /**
      * Store a newly created resource in storage.
      */
     public function store(Request $request): RedirectResponse

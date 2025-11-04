@@ -7,6 +7,7 @@ use App\Models\Website;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class TrackingIngestionService
@@ -23,67 +24,113 @@ class TrackingIngestionService
         string $ip,
         ?string $userAgent
     ): array {
+        Log::debug('Starting event ingestion', [
+            'website_id' => $website->id,
+            'event' => $eventData['event'] ?? null,
+            'idempotency_key' => $eventData['idempotency_key'] ?? null,
+        ]);
+
         return DB::transaction(function () use ($website, $ingestionToken, $eventData, $ip, $userAgent) {
-            // 1. Resolve identity and customer
-            $customer = $this->resolveCustomer($website, $eventData);
+            try {
+                // 1. Resolve identity and customer
+                Log::debug('Step 1: Resolving customer');
+                $customer = $this->resolveCustomer($website, $eventData);
+                Log::debug('Customer resolved', [
+                    'customer_id' => $customer?->id ?? null,
+                ]);
 
-            // 2. Normalize UTM dimensions and acquisition data
-            $utmData = $this->normalizeUtmDimensions($website, $eventData);
-            $referrerDomain = $this->normalizeReferrerDomain($website, $eventData['referrer'] ?? null);
-            $landingPage = $this->normalizeLandingPage($website, $eventData['url'] ?? null);
+                // 2. Normalize UTM parameters (all UTM params use custom UTM system) and acquisition data
+                Log::debug('Step 2: Normalizing UTM parameters and acquisition data');
+                $customUtmValues = $this->normalizeCustomUtmParameters($website, $eventData);
+                $referrerDomain = $this->normalizeReferrerDomain($website, $eventData['referrer'] ?? null);
+                $landingPage = $this->normalizeLandingPage($website, $eventData['url'] ?? null);
+                Log::debug('UTM and acquisition data normalized', [
+                    'custom_utm_value_ids' => $customUtmValues,
+                    'referrer_domain_id' => $referrerDomain,
+                    'landing_page_id' => $landingPage,
+                ]);
 
-            // 3. Sessionize (find or create session)
-            $session = $this->resolveSession(
-                website: $website,
-                customer: $customer,
-                eventData: $eventData,
-                utmData: $utmData,
-                referrerDomain: $referrerDomain,
-                landingPage: $landingPage,
-                ip: $ip,
-                userAgent: $userAgent,
-            );
+                // 3. Sessionize (find or create session)
+                Log::debug('Step 3: Resolving session');
+                $session = $this->resolveSession(
+                    website: $website,
+                    customer: $customer,
+                    eventData: $eventData,
+                    customUtmValues: $customUtmValues,
+                    referrerDomain: $referrerDomain,
+                    landingPage: $landingPage,
+                    ip: $ip,
+                    userAgent: $userAgent,
+                );
+                Log::debug('Session resolved', [
+                    'session_id' => $session?->id ?? null,
+                ]);
 
-            // 4. Create or update touch if this is a new acquisition touchpoint
-            $touch = $this->resolveTouch(
-                website: $website,
-                customer: $customer,
-                session: $session,
-                eventData: $eventData,
-                utmData: $utmData,
-                referrerDomain: $referrerDomain,
-                landingPage: $landingPage,
-            );
-
-            // 5. Create event with idempotency check
-            $event = $this->createEvent(
-                website: $website,
-                customer: $customer,
-                session: $session,
-                ingestionToken: $ingestionToken,
-                eventData: $eventData,
-                utmData: $utmData,
-                referrerDomain: $referrerDomain,
-                landingPage: $landingPage,
-                touch: $touch,
-            );
-
-            // 6. Handle conversion attribution if this is a conversion event
-            if ($this->isConversionEvent($eventData['event'])) {
-                $this->createConversion(
+                // 4. Create or update touch if this is a new acquisition touchpoint
+                Log::debug('Step 4: Resolving touch');
+                $touch = $this->resolveTouch(
                     website: $website,
                     customer: $customer,
                     session: $session,
-                    event: $event,
                     eventData: $eventData,
+                    customUtmValues: $customUtmValues,
+                    referrerDomain: $referrerDomain,
+                    landingPage: $landingPage,
                 );
-            }
+                Log::debug('Touch resolved', [
+                    'touch_id' => $touch?->id ?? null,
+                ]);
 
-            return [
-                'event_id' => $event->id,
-                'customer_id' => $customer?->id,
-                'session_id' => $session?->id,
-            ];
+                // 5. Create event with idempotency check
+                Log::debug('Step 5: Creating event');
+                $event = $this->createEvent(
+                    website: $website,
+                    customer: $customer,
+                    session: $session,
+                    ingestionToken: $ingestionToken,
+                    eventData: $eventData,
+                    customUtmValues: $customUtmValues,
+                    referrerDomain: $referrerDomain,
+                    landingPage: $landingPage,
+                    touch: $touch,
+                );
+                Log::debug('Event created', [
+                    'event_id' => $event->id ?? null,
+                ]);
+
+                // 6. Handle conversion attribution if this is a conversion event
+                if ($this->isConversionEvent($eventData['event'])) {
+                    Log::debug('Step 6: Creating conversion');
+                    $this->createConversion(
+                        website: $website,
+                        customer: $customer,
+                        session: $session,
+                        event: $event,
+                        eventData: $eventData,
+                    );
+                    Log::debug('Conversion created');
+                }
+
+                $result = [
+                    'event_id' => $event->id,
+                    'customer_id' => $customer?->id,
+                    'session_id' => $session?->id,
+                ];
+
+                Log::debug('Event ingestion completed successfully', $result);
+
+                return $result;
+            } catch (\Exception $e) {
+                Log::error('Error during event ingestion', [
+                    'website_id' => $website->id,
+                    'event' => $eventData['event'] ?? null,
+                    'error' => $e->getMessage(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+                throw $e;
+            }
         });
     }
 
@@ -185,48 +232,63 @@ class TrackingIngestionService
     }
 
     /**
-     * Normalize UTM dimensions and return IDs.
+     * Normalize all UTM parameters (including standard ones) using the custom UTM system.
+     * Returns array of custom_utm_value IDs.
+     * 
+     * @return array<int> Array of custom_utm_value IDs
      */
-    protected function normalizeUtmDimensions(Website $website, array $eventData): array
+    protected function normalizeCustomUtmParameters(Website $website, array $eventData): array
     {
-        $utmTables = [
-            'source' => 'utm_sources',
-            'medium' => 'utm_mediums',
-            'campaign' => 'utm_campaigns',
-            'term' => 'utm_terms',
-            'content' => 'utm_contents',
-        ];
+        $customUtmValueIds = [];
 
-        $result = [];
+        // Extract ALL UTM parameters from event data (including standard ones like utm_source, utm_medium, etc.)
+        foreach ($eventData as $key => $value) {
+            // Check if it's a UTM parameter (starts with 'utm_')
+            if (str_starts_with($key, 'utm_') && is_string($value) && !empty($value)) {
+                // Extract parameter name (e.g., 'ad_id' from 'utm_ad_id')
+                $paramName = substr($key, 4); // Remove 'utm_' prefix
+                
+                // Find or create custom UTM parameter
+                $customUtmParam = DB::table('custom_utm_parameters')
+                    ->where('website_id', $website->id)
+                    ->where('name', $paramName)
+                    ->first();
 
-        foreach ($utmTables as $key => $table) {
-            $value = $eventData['utm_' . $key] ?? null;
-            
-            if (!$value) {
-                $result[$key . '_id'] = null;
-                continue;
-            }
+                if (!$customUtmParam) {
+                    $customUtmParamId = DB::table('custom_utm_parameters')->insertGetId([
+                        'website_id' => $website->id,
+                        'name' => $paramName,
+                        'first_seen_at' => now(),
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                    $customUtmParam = (object) ['id' => $customUtmParamId];
+                }
 
-            // Find or create
-            $dimension = DB::table($table)
-                ->where('website_id', $website->id)
-                ->where('value', $value)
-                ->first();
+                // Find or create custom UTM value
+                $customUtmValue = DB::table('custom_utm_values')
+                    ->where('custom_utm_parameter_id', $customUtmParam->id)
+                    ->where('website_id', $website->id)
+                    ->where('value', $value)
+                    ->first();
 
-            if (!$dimension) {
-                $result[$key . '_id'] = DB::table($table)->insertGetId([
-                    'website_id' => $website->id,
-                    'value' => $value,
-                    'first_seen_at' => now(),
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
-            } else {
-                $result[$key . '_id'] = $dimension->id;
+                if (!$customUtmValue) {
+                    $customUtmValueId = DB::table('custom_utm_values')->insertGetId([
+                        'custom_utm_parameter_id' => $customUtmParam->id,
+                        'website_id' => $website->id,
+                        'value' => $value,
+                        'first_seen_at' => now(),
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                    $customUtmValueIds[] = $customUtmValueId;
+                } else {
+                    $customUtmValueIds[] = $customUtmValue->id;
+                }
             }
         }
 
-        return $result;
+        return $customUtmValueIds;
     }
 
     /**
@@ -304,7 +366,7 @@ class TrackingIngestionService
         Website $website,
         ?object $customer,
         array $eventData,
-        array $utmData,
+        array $customUtmValues,
         ?int $referrerDomain,
         ?int $landingPage,
         string $ip,
@@ -319,6 +381,8 @@ class TrackingIngestionService
                 ->first();
 
             if ($session && $this->isSessionActive($session)) {
+                // Link custom UTM values to existing session
+                $this->linkCustomUtmValuesToSession($session->id, $customUtmValues);
                 return $session;
             }
         }
@@ -336,7 +400,9 @@ class TrackingIngestionService
             ->orderBy('started_at', 'desc')
             ->first();
 
-        if ($activeSession && !$this->shouldBreakSession($activeSession, $utmData)) {
+        if ($activeSession && !$this->shouldBreakSession($activeSession)) {
+            // Link custom UTM values to existing active session
+            $this->linkCustomUtmValuesToSession($activeSession->id, $customUtmValues);
             return $activeSession;
         }
 
@@ -347,11 +413,6 @@ class TrackingIngestionService
             'started_at' => Carbon::parse($eventData['timestamp'] ?? now()),
             'landing_page_id' => $landingPage,
             'referrer_domain_id' => $referrerDomain,
-            'utm_source_id' => $utmData['source_id'] ?? null,
-            'utm_medium_id' => $utmData['medium_id'] ?? null,
-            'utm_campaign_id' => $utmData['campaign_id'] ?? null,
-            'utm_term_id' => $utmData['term_id'] ?? null,
-            'utm_content_id' => $utmData['content_id'] ?? null,
             'landing_url' => $eventData['url'] ?? null,
             'referrer_url' => $eventData['referrer'] ?? null,
             'ip' => $ip,
@@ -362,19 +423,20 @@ class TrackingIngestionService
             'updated_at' => now(),
         ]);
 
+        // Link custom UTM values to session
+        $this->linkCustomUtmValuesToSession($sessionId, $customUtmValues);
+
         return DB::table('sessions_tracking')->find($sessionId);
     }
 
     /**
      * Check if session should break due to campaign change.
      */
-    protected function shouldBreakSession(object $session, array $utmData): bool
+    protected function shouldBreakSession(object $session): bool
     {
-        // Break if UTM campaign changed
-        if (($utmData['campaign_id'] ?? null) && $session->utm_campaign_id !== $utmData['campaign_id']) {
-            return true;
-        }
-
+        // Note: UTM parameters are not stored in sessions_tracking table
+        // Session breaks are handled by timeout and referrer changes
+        // For now, we don't break sessions based on UTM changes
         return false;
     }
 
@@ -399,7 +461,7 @@ class TrackingIngestionService
         ?object $customer,
         ?object $session,
         array $eventData,
-        array $utmData,
+        array $customUtmValues,
         ?int $referrerDomain,
         ?int $landingPage
     ): ?object {
@@ -414,22 +476,21 @@ class TrackingIngestionService
             ->first();
 
         if ($existingTouch) {
+            // Link custom UTM values to existing touch
+            $this->linkCustomUtmValuesToTouch($existingTouch->id, $customUtmValues);
             return $existingTouch;
         }
 
         // Only create touch if there's marketing data (UTMs or referrer)
-        if ($utmData['source_id'] || $utmData['medium_id'] || $referrerDomain) {
+        // Check if we have any UTM parameters or referrer
+        $hasUtmParams = !empty($customUtmValues);
+        if ($hasUtmParams || $referrerDomain) {
             $touchId = DB::table('touches')->insertGetId([
                 'website_id' => $website->id,
                 'customer_id' => $customer->id,
                 'session_id' => $session->id,
                 'occurred_at' => Carbon::parse($session->started_at),
                 'type' => 'landing',
-                'utm_source_id' => $utmData['source_id'] ?? null,
-                'utm_medium_id' => $utmData['medium_id'] ?? null,
-                'utm_campaign_id' => $utmData['campaign_id'] ?? null,
-                'utm_term_id' => $utmData['term_id'] ?? null,
-                'utm_content_id' => $utmData['content_id'] ?? null,
                 'referrer_domain_id' => $referrerDomain,
                 'landing_page_id' => $landingPage,
                 'created_at' => now(),
@@ -438,6 +499,9 @@ class TrackingIngestionService
 
             // Update customer's first/last touch if needed
             $this->updateCustomerTouches($customer, $touchId);
+
+            // Link custom UTM values to touch
+            $this->linkCustomUtmValuesToTouch($touchId, $customUtmValues);
 
             return DB::table('touches')->find($touchId);
         }
@@ -475,7 +539,7 @@ class TrackingIngestionService
         ?object $session,
         IngestionToken $ingestionToken,
         array $eventData,
-        array $utmData,
+        array $customUtmValues,
         ?int $referrerDomain,
         ?int $landingPage,
         ?object $touch
@@ -488,6 +552,8 @@ class TrackingIngestionService
             ->first();
 
         if ($existing) {
+            // Link custom UTM values to existing event (in case of duplicates with different UTM params)
+            $this->linkCustomUtmValuesToEvent($existing->event_id, $customUtmValues);
             return DB::table('events')->find($existing->event_id);
         }
 
@@ -510,11 +576,6 @@ class TrackingIngestionService
             'ingestion_token_id' => $ingestionToken->id,
             'schema_version' => $eventData['schema_version'] ?? 1,
             'sdk_version' => $eventData['sdk_version'] ?? null,
-            'utm_source_id' => $utmData['source_id'] ?? null,
-            'utm_medium_id' => $utmData['medium_id'] ?? null,
-            'utm_campaign_id' => $utmData['campaign_id'] ?? null,
-            'utm_term_id' => $utmData['term_id'] ?? null,
-            'utm_content_id' => $utmData['content_id'] ?? null,
             'referrer_domain_id' => $referrerDomain,
             'landing_page_id' => $landingPage,
             'created_at' => now(),
@@ -527,6 +588,9 @@ class TrackingIngestionService
             'event_id' => $eventId,
             'created_at' => now(),
         ]);
+
+        // Link custom UTM values to event
+        $this->linkCustomUtmValuesToEvent($eventId, $customUtmValues);
 
         return DB::table('events')->find($eventId);
     }
@@ -552,10 +616,13 @@ class TrackingIngestionService
             ->orderBy('occurred_at', 'asc')
             ->first();
 
+        // Find last non-direct touch by checking if there are custom UTM values or referrer
+        // Note: Standard UTM parameters are not stored in touches table
+        // We'll check for custom UTM values via junction table
         $lastNonDirectTouch = DB::table('touches')
             ->where('website_id', $website->id)
             ->where('customer_id', $customer->id)
-            ->whereNotNull('utm_source_id') // Non-direct
+            ->whereNotNull('referrer_domain_id') // Non-direct (has referrer)
             ->orderBy('occurred_at', 'desc')
             ->first();
 
@@ -610,6 +677,87 @@ class TrackingIngestionService
         }
 
         return 'other';
+    }
+
+    /**
+     * Link custom UTM values to session via junction table.
+     */
+    protected function linkCustomUtmValuesToSession(int $sessionId, array $customUtmValueIds): void
+    {
+        if (empty($customUtmValueIds)) {
+            return;
+        }
+
+        foreach ($customUtmValueIds as $customUtmValueId) {
+            // Check if link already exists
+            $existing = DB::table('session_custom_utm_values')
+                ->where('session_id', $sessionId)
+                ->where('custom_utm_value_id', $customUtmValueId)
+                ->first();
+
+            if (!$existing) {
+                DB::table('session_custom_utm_values')->insert([
+                    'session_id' => $sessionId,
+                    'custom_utm_value_id' => $customUtmValueId,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Link custom UTM values to event via junction table.
+     */
+    protected function linkCustomUtmValuesToEvent(int $eventId, array $customUtmValueIds): void
+    {
+        if (empty($customUtmValueIds)) {
+            return;
+        }
+
+        foreach ($customUtmValueIds as $customUtmValueId) {
+            // Check if link already exists
+            $existing = DB::table('event_custom_utm_values')
+                ->where('event_id', $eventId)
+                ->where('custom_utm_value_id', $customUtmValueId)
+                ->first();
+
+            if (!$existing) {
+                DB::table('event_custom_utm_values')->insert([
+                    'event_id' => $eventId,
+                    'custom_utm_value_id' => $customUtmValueId,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Link custom UTM values to touch via junction table.
+     */
+    protected function linkCustomUtmValuesToTouch(int $touchId, array $customUtmValueIds): void
+    {
+        if (empty($customUtmValueIds)) {
+            return;
+        }
+
+        foreach ($customUtmValueIds as $customUtmValueId) {
+            // Check if link already exists
+            $existing = DB::table('touch_custom_utm_values')
+                ->where('touch_id', $touchId)
+                ->where('custom_utm_value_id', $customUtmValueId)
+                ->first();
+
+            if (!$existing) {
+                DB::table('touch_custom_utm_values')->insert([
+                    'touch_id' => $touchId,
+                    'custom_utm_value_id' => $customUtmValueId,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
     }
 
     /**

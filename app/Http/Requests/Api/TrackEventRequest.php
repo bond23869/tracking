@@ -20,7 +20,7 @@ class TrackEventRequest extends FormRequest
      */
     public function rules(): array
     {
-        return [
+        $rules = [
             'event' => ['required', 'string', 'max:255'],
             'properties' => ['sometimes', 'array'],
             'customer_id' => ['sometimes', 'nullable', 'string', 'max:255'], // For known customers
@@ -42,6 +42,10 @@ class TrackEventRequest extends FormRequest
             'schema_version' => ['sometimes', 'integer', 'min:1'],
             'sdk_version' => ['sometimes', 'nullable', 'string', 'max:50'],
         ];
+
+        // Allow any custom UTM parameters (e.g., utm_ad_id, utm_custom1, etc.)
+        // These will be validated dynamically in prepareForValidation
+        return $rules;
     }
 
     /**
@@ -77,5 +81,29 @@ class TrackEventRequest extends FormRequest
                 'timestamp' => now()->toIso8601String(),
             ]);
         }
+    }
+
+    /**
+     * Configure the validator instance.
+     */
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            // Validate custom UTM parameters dynamically
+            $standardUtms = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
+            
+            foreach ($this->all() as $key => $value) {
+                // Check if it's a custom UTM parameter (starts with 'utm_' but isn't a standard one)
+                if (str_starts_with($key, 'utm_') && !in_array($key, $standardUtms)) {
+                    // Validate that custom UTM values are strings and not too long
+                    if (!is_string($value) || strlen($value) > 255) {
+                        $validator->errors()->add(
+                            $key,
+                            'Custom UTM parameters must be strings with a maximum length of 255 characters.'
+                        );
+                    }
+                }
+            }
+        });
     }
 }

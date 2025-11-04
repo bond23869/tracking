@@ -34,7 +34,7 @@ class TrackingIngestionService
             try {
                 // 1. Resolve identity and customer
                 Log::debug('Step 1: Resolving customer');
-                $customer = $this->resolveCustomer($website, $eventData);
+                $customer = $this->resolveCustomer($website, $eventData, $ip, $userAgent);
                 Log::debug('Customer resolved', [
                     'customer_id' => $customer?->id ?? null,
                 ]);
@@ -136,8 +136,11 @@ class TrackingIngestionService
 
     /**
      * Resolve customer from identity data.
+     * 
+     * @param string $ip Client IP address
+     * @param string|null $userAgent Client User-Agent string
      */
-    protected function resolveCustomer(Website $website, array $eventData): ?object
+    protected function resolveCustomer(Website $website, array $eventData, string $ip, ?string $userAgent): ?object
     {
         $identityData = $eventData['identity'] ?? null;
         $customerId = $eventData['customer_id'] ?? null;
@@ -156,7 +159,7 @@ class TrackingIngestionService
 
         // Resolve via identity
         if (!$identityData) {
-            // Generate anonymous identity from IP + User-Agent (fallback)
+            // No identity provided - return null (don't create customer without reliable identity)
             return null;
         }
 
@@ -199,6 +202,13 @@ class TrackingIngestionService
                 ->first();
             
             if ($customer) {
+                // If this is an email_hash identity, update customer's email_hash field
+                if ($identityType === 'email_hash' && !$customer->email_hash) {
+                    DB::table('customers')
+                        ->where('id', $customer->id)
+                        ->update(['email_hash' => $identityValueHash, 'updated_at' => now()]);
+                }
+                
                 DB::table('customers')
                     ->where('id', $customer->id)
                     ->update(['last_seen_at' => now(), 'updated_at' => now()]);
@@ -206,22 +216,98 @@ class TrackingIngestionService
             }
         }
 
+        // If this is an email_hash identity, try to find customer by email_hash field
+        // This handles cases where email_hash appears in events but customer wasn't linked
+        if ($identityType === 'email_hash') {
+            $customerByEmail = $this->findCustomerByEmailHash($website, $identityValueHash);
+            if ($customerByEmail) {
+                // Link this email_hash identity to the existing customer
+                DB::table('customer_identity_links')->insert([
+                    'customer_id' => $customerByEmail->id,
+                    'identity_id' => $identity->id,
+                    'confidence' => 0.95, // High confidence for email_hash
+                    'source' => 'heuristic',
+                    'first_seen_at' => now(),
+                    'last_seen_at' => now(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+                
+                DB::table('customers')
+                    ->where('id', $customerByEmail->id)
+                    ->update(['last_seen_at' => now(), 'updated_at' => now()]);
+                
+                return $customerByEmail;
+            }
+        }
+
+        // Before creating a new customer, try to link to existing customer by IP
+        // This handles cases where cookies are cleared (incognito mode, etc.)
+        $existingCustomer = $this->findExistingCustomerByIp($website, $ip, $identityType);
+        
+        if ($existingCustomer) {
+            // Link new identity to existing customer (identity stitching)
+            DB::table('customer_identity_links')->insert([
+                'customer_id' => $existingCustomer->id,
+                'identity_id' => $identity->id,
+                'confidence' => 0.7, // Lower confidence for IP-based linking
+                'source' => 'heuristic',
+                'first_seen_at' => now(),
+                'last_seen_at' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            
+            // If this is an email_hash identity, update customer's email_hash field
+            if ($identityType === 'email_hash' && !$existingCustomer->email_hash) {
+                DB::table('customers')
+                    ->where('id', $existingCustomer->id)
+                    ->update(['email_hash' => $identityValueHash, 'updated_at' => now()]);
+            }
+            
+            DB::table('customers')
+                ->where('id', $existingCustomer->id)
+                ->update(['last_seen_at' => now(), 'updated_at' => now()]);
+            
+            return $existingCustomer;
+        }
+
         // Create new customer
-        $customerId = DB::table('customers')->insertGetId([
+        $customerData = [
             'website_id' => $website->id,
             'first_seen_at' => now(),
             'last_seen_at' => now(),
             'status' => 'active',
             'created_at' => now(),
             'updated_at' => now(),
-        ]);
+        ];
+
+        // If this is an email_hash identity, store it in customer's email_hash field
+        if ($identityType === 'email_hash') {
+            $customerData['email_hash'] = $identityValueHash;
+        }
+
+        $customerId = DB::table('customers')->insertGetId($customerData);
 
         // Link identity to customer
+        $confidence = match($identityType) {
+            'user_id' => 1.0,
+            'email_hash' => 0.95,
+            'cookie' => 1.0,
+            default => 0.9,
+        };
+
+        $source = match($identityType) {
+            'user_id' => 'login',
+            'email_hash' => 'login',
+            default => 'sdk',
+        };
+
         DB::table('customer_identity_links')->insert([
             'customer_id' => $customerId,
             'identity_id' => $identity->id,
-            'confidence' => 1.0,
-            'source' => $identityType === 'user_id' ? 'login' : 'sdk',
+            'confidence' => $confidence,
+            'source' => $source,
             'first_seen_at' => now(),
             'last_seen_at' => now(),
             'created_at' => now(),
@@ -229,6 +315,113 @@ class TrackingIngestionService
         ]);
 
         return DB::table('customers')->find($customerId);
+    }
+
+    /**
+     * Find existing customer by IP address within a recent time window.
+     * This helps link new cookie identities to existing customers when cookies are cleared.
+     * 
+     * @param string $ip Client IP address
+     * @param string $identityType Type of identity being created (to exclude from matching)
+     * @return object|null Existing customer or null
+     */
+    protected function findExistingCustomerByIp(Website $website, string $ip, string $identityType): ?object
+    {
+        // Only link cookie identities (not user_id or email_hash which are more reliable)
+        if ($identityType !== 'cookie') {
+            return null;
+        }
+
+        // Look for recent sessions (within last 2 hours) with the same IP
+        // This handles cases where cookies are cleared but user is still on same device/IP
+        $recentSession = DB::table('sessions_tracking')
+            ->where('website_id', $website->id)
+            ->where('ip', $ip)
+            ->where('started_at', '>', now()->subHours(2))
+            ->orderBy('started_at', 'desc')
+            ->first();
+
+        if (!$recentSession) {
+            return null;
+        }
+
+        // Get the customer from the recent session
+        $customer = DB::table('customers')
+            ->where('id', $recentSession->customer_id)
+            ->where('website_id', $website->id)
+            ->first();
+
+        // Only return if this customer doesn't have a recent cookie identity
+        // This handles cases where cookies are cleared - we link new cookie to existing customer
+        if ($customer) {
+            // Check if customer has a recent cookie identity (within last 30 minutes)
+            $hasRecentCookieIdentity = DB::table('customer_identity_links')
+                ->join('identities', 'customer_identity_links.identity_id', '=', 'identities.id')
+                ->where('customer_identity_links.customer_id', $customer->id)
+                ->where('identities.type', 'cookie')
+                ->where('identities.last_seen_at', '>', now()->subMinutes(30))
+                ->exists();
+
+            // If no recent cookie identity, link the new cookie to this customer
+            // This handles cookie clearing (incognito mode, browser reset, etc.)
+            if (!$hasRecentCookieIdentity) {
+                return $customer;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Find existing customer by email hash.
+     * This handles cases where email_hash appears in events but customer wasn't linked yet.
+     * 
+     * @param string $emailHash Hashed email address
+     * @return object|null Existing customer or null
+     */
+    protected function findCustomerByEmailHash(Website $website, string $emailHash): ?object
+    {
+        // First check customers table directly
+        $customer = DB::table('customers')
+            ->where('website_id', $website->id)
+            ->where('email_hash', $emailHash)
+            ->first();
+
+        if ($customer) {
+            return $customer;
+        }
+
+        // Also check if there's an identity with this email_hash linked to a customer
+        $identity = DB::table('identities')
+            ->where('website_id', $website->id)
+            ->where('type', 'email_hash')
+            ->where('value_hash', $emailHash)
+            ->first();
+
+        if ($identity) {
+            $link = DB::table('customer_identity_links')
+                ->where('identity_id', $identity->id)
+                ->first();
+
+            if ($link) {
+                $customer = DB::table('customers')
+                    ->where('id', $link->customer_id)
+                    ->where('website_id', $website->id)
+                    ->first();
+
+                if ($customer) {
+                    // Update customer's email_hash field for faster future lookups
+                    if (!$customer->email_hash) {
+                        DB::table('customers')
+                            ->where('id', $customer->id)
+                            ->update(['email_hash' => $emailHash, 'updated_at' => now()]);
+                    }
+                    return $customer;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

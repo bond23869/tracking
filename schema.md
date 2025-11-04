@@ -196,11 +196,13 @@ The application uses the Spatie Permission package for role-based access control
 | `id` | bigint | Primary Key, Auto Increment | Unique website identifier |
 | `organization_id` | bigint | Foreign Key, Cascade Delete | Reference to organization |
 | `account_id` | bigint | Foreign Key, Cascade Delete | Reference to account |
+| `type` | string | Default: 'woocommerce' | Website type (woocommerce, shopify, etc.) |
 | `name` | string | Required | Website display name |
 | `url` | string | Required | Website URL |
 | `status` | string | Default: 'active' | Website status |
 | `connection_status` | string | Default: 'connected' | Connection status |
 | `connection_error` | string | Nullable | Connection error message |
+| `archived_at` | timestamp | Nullable | Website archival timestamp |
 | `created_at` | timestamp | Auto | Record creation timestamp |
 | `updated_at` | timestamp | Auto | Record update timestamp |
 
@@ -710,14 +712,25 @@ The application uses the Spatie Permission package for role-based access control
 
 ### Website Pixels Table
 
-**Purpose**: Stores pixel tracking configurations for websites.
+**Purpose**: Stores pixel tracking configurations for websites across multiple platforms.
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | `id` | bigint | Primary Key, Auto Increment | Unique pixel identifier |
 | `website_id` | bigint | Foreign Key, Cascade Delete | Reference to website |
-| `pixel_id` | string | Required | Pixel identifier |
-| `access_token` | string | Required | Pixel access token |
+| `platform` | string | Required | Platform name (meta, google, tiktok, pinterest, snapchat, x, klaviyo, reddit) |
+| `name` | string | Required | Pixel name/identifier |
+| `is_active` | boolean | Default: true | Whether the pixel is active |
+| `pixel_id` | string | Nullable | Pixel identifier (platform-specific, e.g., Meta Pixel ID) |
+| `access_token` | string | Nullable | Pixel access token (platform-specific) |
+| `conversion_id` | string | Nullable | Google conversion ID |
+| `conversion_labels` | json | Nullable | Google conversion labels |
+| `tag_id` | string | Nullable | Pinterest tag ID |
+| `ad_account_id` | string | Nullable | Pinterest ad account ID |
+| `snapchat_pixel_id` | string | Nullable | Snapchat pixel ID |
+| `event_ids` | json | Nullable | X.com event IDs |
+| `public_api_key` | string | Nullable | Klaviyo public API key |
+| `private_api_key` | string | Nullable | Klaviyo private API key |
 | `created_at` | timestamp | Auto | Record creation timestamp |
 | `updated_at` | timestamp | Auto | Record update timestamp |
 
@@ -1085,5 +1098,8 @@ The migrations should be run in the following order (as indicated by timestamps)
 
 ### Updates
 32. `2025_11_03_092236_add_archived_at_to_accounts_table.php` - Account archival
+33. `2025_11_03_095137_add_type_to_websites_table.php` - Website type support
+34. `2025_11_03_100336_add_archived_at_to_websites_table.php` - Website archival
+35. `2025_11_03_132658_expand_website_pixels_table.php` - Multi-platform pixel support
 
 This order ensures proper foreign key relationships and dependencies are maintained.

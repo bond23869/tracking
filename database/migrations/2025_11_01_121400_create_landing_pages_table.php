@@ -15,12 +15,12 @@ return new class extends Migration
             $table->id();
             $table->foreignId('website_id')->constrained()->onDelete('cascade');
             $table->string('path');
-            $table->string('query_hash', 64)->default('');
+            // query_hash removed - adds unnecessary complexity
             $table->text('full_url_sample')->nullable();
-            $table->timestamp('first_seen_at')->nullable();
+            // first_seen_at removed - use created_at instead
             $table->timestamps();
 
-            $table->unique(['website_id', 'path', 'query_hash'], 'landing_pages_site_path_query_unique');
+            $table->unique(['website_id', 'path'], 'landing_pages_site_path_unique');
             $table->index(['website_id']);
         });
     }

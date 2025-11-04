@@ -212,7 +212,7 @@ The application uses the Spatie Permission package for role-based access control
 - Has many `IngestionTokens`
 - Has many `Identities`
 - Has many `Customers`
-- Has many `Sessions` (sessions_tracking)
+- Has many `Sessions` (tracking_sessions)
 - Has many `Events`
 - Has many `Touches`
 - Has many `Conversions`
@@ -246,7 +246,6 @@ The application uses the Spatie Permission package for role-based access control
 **Relationships**:
 - Belongs to one `Website`
 - Has many `Events`
-- Has many `TokenUsages`
 
 ### Identities Table
 
@@ -258,8 +257,6 @@ The application uses the Spatie Permission package for role-based access control
 | `website_id` | bigint | Foreign Key, Cascade Delete | Reference to website |
 | `type` | string | Required | Identity type (cookie, user_id, email_hash, ga_cid, etc.) |
 | `value_hash` | string | Required | Hashed identity value |
-| `first_seen_at` | timestamp | Nullable | First appearance timestamp |
-| `last_seen_at` | timestamp | Nullable | Last appearance timestamp |
 | `created_at` | timestamp | Auto | Record creation timestamp |
 | `updated_at` | timestamp | Auto | Record update timestamp |
 
@@ -280,8 +277,6 @@ The application uses the Spatie Permission package for role-based access control
 |--------|------|-------------|-------------|
 | `id` | bigint | Primary Key, Auto Increment | Unique customer identifier |
 | `website_id` | bigint | Foreign Key, Cascade Delete | Reference to website |
-| `first_seen_at` | timestamp | Nullable | First appearance timestamp |
-| `last_seen_at` | timestamp | Nullable | Last appearance timestamp |
 | `first_touch_id` | bigint | Nullable | Reference to first touch event |
 | `last_touch_id` | bigint | Nullable | Reference to last touch event |
 | `email_hash` | string | Nullable | Hashed email address |
@@ -294,7 +289,7 @@ The application uses the Spatie Permission package for role-based access control
 
 **Relationships**:
 - Belongs to one `Website`
-- Has many `Sessions` (sessions_tracking)
+- Has many `Sessions` (tracking_sessions)
 - Has many `Events`
 - Has many `Touches`
 - Has many `Conversions`
@@ -311,8 +306,6 @@ The application uses the Spatie Permission package for role-based access control
 | `identity_id` | bigint | Foreign Key, Cascade Delete | Reference to identity |
 | `confidence` | decimal(5,4) | Default: 1.0000 | Link confidence score (0-1) |
 | `source` | string | Nullable | Link source (login, heuristic, sdk) |
-| `first_seen_at` | timestamp | Nullable | First link appearance |
-| `last_seen_at` | timestamp | Nullable | Last link appearance |
 | `created_at` | timestamp | Auto | Record creation timestamp |
 | `updated_at` | timestamp | Auto | Record update timestamp |
 
@@ -325,7 +318,7 @@ The application uses the Spatie Permission package for role-based access control
 - Belongs to one `Customer`
 - Belongs to one `Identity`
 
-### Sessions Tracking Table
+### Tracking Sessions Table
 
 **Purpose**: Tracks user sessions with attribution data.
 
@@ -357,7 +350,7 @@ The application uses the Spatie Permission package for role-based access control
 - Belongs to one `Customer`
 - Belongs to one `LandingPage` (nullable)
 - Belongs to one `ReferrerDomain` (nullable)
-- Belongs to many `CustomUtmValues` (via session_custom_utm_values)
+- Belongs to many `CustomUtmValues` (via trackable_utm_values polymorphic)
 - Has many `Events`
 - Has many `Touches`
 - Has many `Conversions`
@@ -370,17 +363,15 @@ The application uses the Spatie Permission package for role-based access control
 |--------|------|-------------|-------------|
 | `id` | bigint | Primary Key, Auto Increment | Unique event identifier |
 | `website_id` | bigint | Foreign Key, Cascade Delete | Reference to website |
-| `session_id` | bigint | Foreign Key, Nullable | Reference to session |
+| `session_id` | bigint | Foreign Key, Required | Reference to session (required) |
 | `customer_id` | bigint | Foreign Key, Nullable | Reference to customer |
 | `name` | string | Required | Event name |
 | `occurred_at` | timestamp | Required | Event timestamp |
 | `props` | json | Nullable | Event properties |
 | `revenue_cents` | integer | Nullable | Revenue in cents |
 | `currency` | string(3) | Nullable | Currency code |
-| `idempotency_key` | string | Required, Unique | Event deduplication key |
+| `idempotency_key` | string | Required, Unique | Event deduplication key (unique constraint ensures idempotency) |
 | `ingestion_token_id` | bigint | Foreign Key, Nullable | Token used for ingestion |
-| `schema_version` | unsigned integer | Default: 1 | Event schema version |
-| `sdk_version` | string | Nullable | SDK version |
 | `referrer_domain_id` | bigint | Foreign Key, Nullable | Referrer domain reference |
 | `landing_page_id` | bigint | Foreign Key, Nullable | Landing page reference |
 | `created_at` | timestamp | Auto | Record creation timestamp |
@@ -394,26 +385,11 @@ The application uses the Spatie Permission package for role-based access control
 
 **Relationships**:
 - Belongs to one `Website`
-- Belongs to one `Session` (nullable)
+- Belongs to one `Session` (required)
 - Belongs to one `Customer` (nullable)
 - Belongs to one `IngestionToken` (nullable)
-- Belongs to many `CustomUtmValues` (via event_custom_utm_values)
-- Has one `EventDedupKey`
+- Belongs to many `CustomUtmValues` (via trackable_utm_values polymorphic)
 - Has one `Conversion` (if conversion event)
-
-### Event Dedup Keys Table
-
-**Purpose**: Ensures event idempotency by tracking processed idempotency keys.
-
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | bigint | Primary Key, Auto Increment | Unique dedup key identifier |
-| `idempotency_key` | string | Required, Unique | Event idempotency key |
-| `event_id` | bigint | Foreign Key, Cascade Delete | Reference to event |
-| `created_at` | timestamp | Auto | Record creation timestamp |
-
-**Relationships**:
-- Belongs to one `Event`
 
 ### Touches Table
 
@@ -441,7 +417,7 @@ The application uses the Spatie Permission package for role-based access control
 - Belongs to one `Website`
 - Belongs to one `Customer`
 - Belongs to one `Session` (nullable)
-- Belongs to many `CustomUtmValues` (via touch_custom_utm_values)
+- Belongs to many `CustomUtmValues` (via trackable_utm_values polymorphic)
 - Has many `Conversions` (as first_touch, last_non_direct_touch, or attributed_touch)
 
 ### Conversions Table
@@ -463,12 +439,18 @@ The application uses the Spatie Permission package for role-based access control
 | `attributed_touch_id` | bigint | Foreign Key, Nullable | Attributed touch (based on model) |
 | `attribution_model` | string | Nullable | Attribution model used (first_touch, last_non_direct, etc.) |
 | `attribution_weight` | json | Nullable | Attribution weights for multi-touch models |
+| `utm_current` | json | Nullable | UTM parameters at conversion time |
+| `utm_attribution` | json | Nullable | Calculated attribution result |
+| `order_id` | bigint | Nullable | Order identifier |
+| `order_number` | string | Nullable | Order number |
 | `created_at` | timestamp | Auto | Record creation timestamp |
 | `updated_at` | timestamp | Auto | Record update timestamp |
 
 **Indexes**:
 - `(website_id, occurred_at)` - Fast lookup by website and time
 - `(customer_id, occurred_at)` - Fast lookup by customer and time
+- `(order_id)` - Fast lookup by order ID
+- `(order_number)` - Fast lookup by order number
 
 **Relationships**:
 - Belongs to one `Website`
@@ -488,13 +470,11 @@ The application uses the Spatie Permission package for role-based access control
 | `id` | bigint | Primary Key, Auto Increment | Unique landing page identifier |
 | `website_id` | bigint | Foreign Key, Cascade Delete | Reference to website |
 | `path` | string | Required | Page path |
-| `query_hash` | string(64) | Default: '' | Query string hash |
 | `full_url_sample` | text | Nullable | Sample full URL |
-| `first_seen_at` | timestamp | Nullable | First appearance timestamp |
 | `created_at` | timestamp | Auto | Record creation timestamp |
 | `updated_at` | timestamp | Auto | Record update timestamp |
 
-**Unique Constraint**: `(website_id, path, query_hash)`
+**Unique Constraint**: `(website_id, path)`
 
 **Indexes**:
 - `(website_id)` - Fast lookup by website
@@ -515,7 +495,6 @@ The application uses the Spatie Permission package for role-based access control
 | `website_id` | bigint | Foreign Key, Cascade Delete | Reference to website |
 | `domain` | string | Required | Referrer domain |
 | `category` | string | Nullable | Domain category (search, social, email, direct, other) |
-| `first_seen_at` | timestamp | Nullable | First appearance timestamp |
 | `created_at` | timestamp | Auto | Record creation timestamp |
 | `updated_at` | timestamp | Auto | Record update timestamp |
 
@@ -541,7 +520,6 @@ The application uses the Spatie Permission package for role-based access control
 | `id` | bigint | Primary Key, Auto Increment | Unique parameter identifier |
 | `website_id` | bigint | Foreign Key, Cascade Delete | Reference to website |
 | `name` | string | Required | Parameter name (e.g., 'burek', 'custom1') |
-| `first_seen_at` | timestamp | Nullable | First appearance timestamp |
 | `created_at` | timestamp | Auto | Record creation timestamp |
 | `updated_at` | timestamp | Auto | Record update timestamp |
 
@@ -560,88 +538,40 @@ The application uses the Spatie Permission package for role-based access control
 |--------|------|-------------|-------------|
 | `id` | bigint | Primary Key, Auto Increment | Unique value identifier |
 | `custom_utm_parameter_id` | bigint | Foreign Key, Cascade Delete | Reference to custom UTM parameter |
-| `website_id` | bigint | Foreign Key, Cascade Delete | Reference to website |
 | `value` | string | Required | Parameter value |
-| `first_seen_at` | timestamp | Nullable | First appearance timestamp |
 | `created_at` | timestamp | Auto | Record creation timestamp |
 | `updated_at` | timestamp | Auto | Record update timestamp |
 
-**Unique Constraint**: `(custom_utm_parameter_id, website_id, value)`
+**Unique Constraint**: `(custom_utm_parameter_id, value)`
 
 **Indexes**:
-- `(website_id, custom_utm_parameter_id)` - Fast lookup by website and parameter
+- `(custom_utm_parameter_id)` - Fast lookup by parameter
 
 **Relationships**:
 - Belongs to one `CustomUtmParameter`
-- Belongs to one `Website`
-- Belongs to many `Sessions` (via session_custom_utm_values)
-- Belongs to many `Events` (via event_custom_utm_values)
-- Belongs to many `Touches` (via touch_custom_utm_values)
+- Belongs to many `Sessions`, `Events`, and `Touches` (via trackable_utm_values polymorphic)
 
-#### Session Custom Utm Values Table
+#### Trackable Utm Values Table
 
-**Purpose**: Junction table linking sessions to custom UTM values.
+**Purpose**: Polymorphic junction table linking sessions, events, and touches to custom UTM values.
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | `id` | bigint | Primary Key, Auto Increment | Unique link identifier |
-| `session_id` | bigint | Foreign Key, Cascade Delete | Reference to session |
+| `trackable_type` | string | Required | Polymorphic type (session, event, touch) |
+| `trackable_id` | bigint | Required | Polymorphic ID reference |
 | `custom_utm_value_id` | bigint | Foreign Key, Cascade Delete | Reference to custom UTM value |
 | `created_at` | timestamp | Auto | Record creation timestamp |
 | `updated_at` | timestamp | Auto | Record update timestamp |
 
-**Unique Constraint**: `(session_id, custom_utm_value_id)`
+**Unique Constraint**: `(trackable_type, trackable_id, custom_utm_value_id)`
 
 **Indexes**:
-- `(session_id)` - Fast lookup by session
-- `(custom_utm_value_id)` - Fast lookup by value
+- `(trackable_type, trackable_id)` - Fast lookup by trackable entity (created by morphs)
+- `(custom_utm_value_id)` - Fast lookup by UTM value
 
 **Relationships**:
-- Belongs to one `Session`
-- Belongs to one `CustomUtmValue`
-
-#### Event Custom Utm Values Table
-
-**Purpose**: Junction table linking events to custom UTM values.
-
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | bigint | Primary Key, Auto Increment | Unique link identifier |
-| `event_id` | bigint | Foreign Key, Cascade Delete | Reference to event |
-| `custom_utm_value_id` | bigint | Foreign Key, Cascade Delete | Reference to custom UTM value |
-| `created_at` | timestamp | Auto | Record creation timestamp |
-| `updated_at` | timestamp | Auto | Record update timestamp |
-
-**Unique Constraint**: `(event_id, custom_utm_value_id)`
-
-**Indexes**:
-- `(event_id)` - Fast lookup by event
-- `(custom_utm_value_id)` - Fast lookup by value
-
-**Relationships**:
-- Belongs to one `Event`
-- Belongs to one `CustomUtmValue`
-
-#### Touch Custom Utm Values Table
-
-**Purpose**: Junction table linking touches to custom UTM values.
-
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | bigint | Primary Key, Auto Increment | Unique link identifier |
-| `touch_id` | bigint | Foreign Key, Cascade Delete | Reference to touch |
-| `custom_utm_value_id` | bigint | Foreign Key, Cascade Delete | Reference to custom UTM value |
-| `created_at` | timestamp | Auto | Record creation timestamp |
-| `updated_at` | timestamp | Auto | Record update timestamp |
-
-**Unique Constraint**: `(touch_id, custom_utm_value_id)`
-
-**Indexes**:
-- `(touch_id)` - Fast lookup by touch
-- `(custom_utm_value_id)` - Fast lookup by value
-
-**Relationships**:
-- Belongs to one `Touch`
+- Polymorphic: belongs to `Session`, `Event`, or `Touch`
 - Belongs to one `CustomUtmValue`
 
 ### Funnels Table
@@ -685,30 +615,6 @@ The application uses the Spatie Permission package for role-based access control
 **Relationships**:
 - Belongs to one `Funnel`
 
-### Token Usages Table
-
-**Purpose**: Tracks API token usage for monitoring and analytics.
-
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | bigint | Primary Key, Auto Increment | Unique usage identifier |
-| `ingestion_token_id` | bigint | Foreign Key, Cascade Delete | Reference to token |
-| `website_id` | bigint | Foreign Key, Cascade Delete | Reference to website |
-| `occurred_at` | timestamp | Required | Usage timestamp |
-| `ip` | string(45) | Nullable | Client IP address |
-| `success` | boolean | Default: true | Request success status |
-| `error_code` | string | Nullable | Error code if failed |
-| `request_id` | string | Nullable | Request identifier |
-| `created_at` | timestamp | Auto | Record creation timestamp |
-| `updated_at` | timestamp | Auto | Record update timestamp |
-
-**Indexes**:
-- `(ingestion_token_id, occurred_at)` - Fast lookup by token and time
-- `(website_id, occurred_at)` - Fast lookup by website and time
-
-**Relationships**:
-- Belongs to one `IngestionToken`
-- Belongs to one `Website`
 
 ### Website Pixels Table
 
@@ -849,7 +755,7 @@ Websites
 ├── has_many: IngestionTokens
 ├── has_many: Identities
 ├── has_many: Customers
-├── has_many: Sessions (sessions_tracking)
+├── has_many: Sessions (tracking_sessions)
 ├── has_many: Events
 ├── has_many: Touches
 ├── has_many: Conversions
@@ -861,8 +767,7 @@ Websites
 
 IngestionTokens
 ├── belongs_to: Website
-├── has_many: Events
-└── has_many: TokenUsages
+└── has_many: Events
 
 Identities
 ├── belongs_to: Website
@@ -870,7 +775,7 @@ Identities
 
 Customers
 ├── belongs_to: Website
-├── has_many: Sessions (sessions_tracking)
+├── has_many: Sessions (tracking_sessions)
 ├── has_many: Events
 ├── has_many: Touches
 ├── has_many: Conversions
@@ -880,30 +785,29 @@ CustomerIdentityLinks
 ├── belongs_to: Customer
 └── belongs_to: Identity
 
-Sessions (sessions_tracking)
+Sessions (tracking_sessions)
 ├── belongs_to: Website
 ├── belongs_to: Customer
 ├── belongs_to: LandingPage (nullable)
 ├── belongs_to: ReferrerDomain (nullable)
+├── belongs_to_many: CustomUtmValues (via trackable_utm_values)
 ├── has_many: Events
 ├── has_many: Touches
 └── has_many: Conversions
 
 Events
 ├── belongs_to: Website
-├── belongs_to: Session (nullable)
+├── belongs_to: Session (required)
 ├── belongs_to: Customer (nullable)
 ├── belongs_to: IngestionToken (nullable)
-├── has_one: EventDedupKey
+├── belongs_to_many: CustomUtmValues (via trackable_utm_values)
 └── has_one: Conversion
-
-EventDedupKeys
-└── belongs_to: Event
 
 Touches
 ├── belongs_to: Website
 ├── belongs_to: Customer
 ├── belongs_to: Session (nullable)
+├── belongs_to_many: CustomUtmValues (via trackable_utm_values)
 ├── has_many: Conversions (as first_touch, last_non_direct_touch, attributed_touch)
 
 Conversions
@@ -933,10 +837,11 @@ CustomUtmParameters
 
 CustomUtmValues
 ├── belongs_to: CustomUtmParameter
-├── belongs_to: Website
-├── belongs_to_many: Sessions (via session_custom_utm_values)
-├── belongs_to_many: Events (via event_custom_utm_values)
-└── belongs_to_many: Touches (via touch_custom_utm_values)
+├── belongs_to_many: Sessions, Events, Touches (via trackable_utm_values polymorphic)
+
+TrackableUtmValues
+├── polymorphic: belongs_to Session, Event, or Touch
+└── belongs_to: CustomUtmValue
 
 Funnels
 ├── belongs_to: Website
@@ -946,9 +851,6 @@ Funnels
 FunnelSteps
 └── belongs_to: Funnel
 
-TokenUsages
-├── belongs_to: IngestionToken
-└── belongs_to: Website
 
 WebsitePixels
 └── belongs_to: Website
@@ -1006,9 +908,9 @@ Permissions
 
 ### Event Tracking
 - Comprehensive event ingestion via API tokens
-- Event deduplication using idempotency keys
+- Event deduplication using unique idempotency_key constraint
 - Revenue tracking with multi-currency support
-- Schema versioning for event evolution
+- All events require a session (session_id is required)
 
 ### Customer Identity Management
 - Multi-identity linking (cookies, user IDs, email hashes, etc.)
@@ -1046,7 +948,7 @@ Permissions
 - Scoped token permissions
 - IP allowlisting
 - Token expiration and revocation
-- Usage tracking and monitoring
+- Last usage tracking via `last_used_at` on tokens
 
 ## Migration Order
 
@@ -1086,20 +988,17 @@ The migrations should be run in the following order (as indicated by timestamps)
 ### Custom UTM Parameters
 22. `2025_11_01_122400_create_custom_utm_parameters_table.php` - Custom UTM parameter definitions
 23. `2025_11_01_122410_create_custom_utm_values_table.php` - Custom UTM value storage
-24. `2025_11_01_122420_create_session_custom_utm_values_table.php` - Session custom UTM junction
-25. `2025_11_01_122430_create_event_custom_utm_values_table.php` - Event custom UTM junction
-26. `2025_11_01_122440_create_touch_custom_utm_values_table.php` - Touch custom UTM junction
+24. `2025_11_01_122450_create_trackable_utm_values_table.php` - Polymorphic UTM value linking (sessions, events, touches)
 
 ### Analysis & Monitoring
-28. `2025_11_01_122000_create_funnels_table.php` - Funnel analysis
-29. `2025_11_01_122100_create_funnel_steps_table.php` - Funnel step definitions
-30. `2025_11_01_122200_create_event_dedup_keys_table.php` - Event deduplication
-31. `2025_11_01_122300_create_token_usages_table.php` - Token usage monitoring
+25. `2025_11_01_122000_create_funnels_table.php` - Funnel analysis
+26. `2025_11_01_122100_create_funnel_steps_table.php` - Funnel step definitions
 
 ### Updates
-32. `2025_11_03_092236_add_archived_at_to_accounts_table.php` - Account archival
-33. `2025_11_03_095137_add_type_to_websites_table.php` - Website type support
-34. `2025_11_03_100336_add_archived_at_to_websites_table.php` - Website archival
-35. `2025_11_03_132658_expand_website_pixels_table.php` - Multi-platform pixel support
+27. `2025_11_03_092236_add_archived_at_to_accounts_table.php` - Account archival
+28. `2025_11_03_095137_add_type_to_websites_table.php` - Website type support
+29. `2025_11_03_100336_add_archived_at_to_websites_table.php` - Website archival
+30. `2025_11_03_132658_expand_website_pixels_table.php` - Multi-platform pixel support
+31. `2025_11_04_091802_add_order_fields_to_conversions_table.php` - Order fields (now included in main conversion migration)
 
 This order ensures proper foreign key relationships and dependencies are maintained.

@@ -15,7 +15,6 @@ return new class extends Migration
             $table->id();
             $table->foreignId('website_id')->constrained()->onDelete('cascade');
             $table->string('name'); // e.g., 'burek', 'custom1', etc.
-            $table->timestamp('first_seen_at')->nullable();
             $table->timestamps();
 
             $table->unique(['website_id', 'name']);

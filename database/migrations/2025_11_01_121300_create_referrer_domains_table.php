@@ -16,7 +16,7 @@ return new class extends Migration
             $table->foreignId('website_id')->constrained()->onDelete('cascade');
             $table->string('domain');
             $table->string('category')->nullable(); // search, social, email, direct, other
-            $table->timestamp('first_seen_at')->nullable();
+            // first_seen_at removed - use created_at instead
             $table->timestamps();
 
             $table->unique(['website_id', 'domain']);

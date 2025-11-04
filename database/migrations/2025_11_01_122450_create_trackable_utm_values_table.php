@@ -11,14 +11,15 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('session_custom_utm_values', function (Blueprint $table) {
+        Schema::create('trackable_utm_values', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('session_id')->constrained('sessions_tracking')->onDelete('cascade');
+            $table->morphs('trackable'); // trackable_type, trackable_id (session/event/touch)
             $table->foreignId('custom_utm_value_id')->constrained('custom_utm_values')->onDelete('cascade');
             $table->timestamps();
 
-            $table->unique(['session_id', 'custom_utm_value_id']);
-            $table->index(['session_id']);
+            // Prevent duplicate assignments
+            // Note: morphs('trackable') already creates an index on (trackable_type, trackable_id)
+            $table->unique(['trackable_type', 'trackable_id', 'custom_utm_value_id'], 'trackable_utm_unique');
             $table->index(['custom_utm_value_id']);
         });
     }
@@ -28,6 +29,7 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('session_custom_utm_values');
+        Schema::dropIfExists('trackable_utm_values');
     }
 };
+

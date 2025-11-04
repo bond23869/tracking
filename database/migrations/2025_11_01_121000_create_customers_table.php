@@ -14,8 +14,7 @@ return new class extends Migration
         Schema::create('customers', function (Blueprint $table) {
             $table->id();
             $table->foreignId('website_id')->constrained()->onDelete('cascade');
-            $table->timestamp('first_seen_at')->nullable();
-            $table->timestamp('last_seen_at')->nullable();
+            // first_seen_at/last_seen_at removed - use created_at/updated_at instead
             $table->unsignedBigInteger('first_touch_id')->nullable();
             $table->unsignedBigInteger('last_touch_id')->nullable();
             $table->string('email_hash')->nullable();

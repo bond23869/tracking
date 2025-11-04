@@ -43,20 +43,17 @@ class TrackingController extends Controller
 
             $duration = round((microtime(true) - $startTime) * 1000, 2);
 
-            Log::info('Tracking event processed successfully', [
+            Log::info('Tracking event stored and queued for processing', [
                 'website_id' => $request->website->id,
                 'event' => $request->input('event'),
                 'event_id' => $result['event_id'],
-                'customer_id' => $result['customer_id'],
-                'session_id' => $result['session_id'],
                 'duration_ms' => $duration,
             ]);
 
             return response()->json([
                 'success' => true,
                 'event_id' => $result['event_id'],
-                'customer_id' => $result['customer_id'],
-                'session_id' => $result['session_id'],
+                'message' => 'Event stored and queued for processing',
             ], 201);
         } catch (\Exception $e) {
             $duration = round((microtime(true) - $startTime) * 1000, 2);

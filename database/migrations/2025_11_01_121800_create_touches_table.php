@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('website_id')->constrained()->onDelete('cascade');
             $table->foreignId('customer_id')->constrained('customers')->onDelete('cascade');
-            $table->foreignId('session_id')->nullable()->constrained('sessions_tracking')->nullOnDelete();
+            $table->foreignId('session_id')->nullable()->constrained('tracking_sessions')->nullOnDelete();
             $table->timestamp('occurred_at');
             $table->string('type'); // landing, ad_click, email_open, etc.
 

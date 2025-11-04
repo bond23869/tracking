@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('events', function (Blueprint $table) {
             $table->id();
             $table->foreignId('website_id')->constrained()->onDelete('cascade');
-            $table->foreignId('session_id')->nullable()->constrained('sessions_tracking')->nullOnDelete();
+            $table->foreignId('session_id')->constrained('tracking_sessions')->onDelete('cascade');
             $table->foreignId('customer_id')->nullable()->constrained('customers')->nullOnDelete();
 
             $table->string('name');
@@ -25,8 +25,6 @@ return new class extends Migration
 
             $table->string('idempotency_key')->unique();
             $table->foreignId('ingestion_token_id')->nullable()->constrained('ingestion_tokens')->nullOnDelete();
-            $table->unsignedInteger('schema_version')->default(1);
-            $table->string('sdk_version')->nullable();
 
             // Optional landing/referrer snapshots for faster joins
             $table->foreignId('referrer_domain_id')->nullable()->constrained('referrer_domains')->nullOnDelete();

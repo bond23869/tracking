@@ -14,13 +14,12 @@ return new class extends Migration
         Schema::create('custom_utm_values', function (Blueprint $table) {
             $table->id();
             $table->foreignId('custom_utm_parameter_id')->constrained('custom_utm_parameters')->onDelete('cascade');
-            $table->foreignId('website_id')->constrained()->onDelete('cascade');
             $table->string('value');
-            $table->timestamp('first_seen_at')->nullable();
             $table->timestamps();
 
-            $table->unique(['custom_utm_parameter_id', 'website_id', 'value'], 'custom_utm_values_unique');
-            $table->index(['website_id', 'custom_utm_parameter_id']);
+            // website_id can be derived through custom_utm_parameter relationship
+            $table->unique(['custom_utm_parameter_id', 'value'], 'custom_utm_values_unique');
+            $table->index(['custom_utm_parameter_id']);
         });
     }
 

@@ -39,8 +39,6 @@ class TrackEventRequest extends FormRequest
             'currency' => ['sometimes', 'nullable', 'string', 'size:3'],
             'idempotency_key' => ['sometimes', 'nullable', 'string', 'max:255'],
             'timestamp' => ['sometimes', 'nullable', 'date'],
-            'schema_version' => ['sometimes', 'integer', 'min:1'],
-            'sdk_version' => ['sometimes', 'nullable', 'string', 'max:50'],
         ];
 
         // Allow any custom UTM parameters (e.g., utm_ad_id, utm_custom1, etc.)

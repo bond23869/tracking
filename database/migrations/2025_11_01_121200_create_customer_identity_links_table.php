@@ -17,8 +17,7 @@ return new class extends Migration
             $table->foreignId('identity_id')->constrained()->onDelete('cascade');
             $table->decimal('confidence', 5, 4)->unsigned()->default(1.0000); // 0..1
             $table->string('source')->nullable(); // login, heuristic, sdk
-            $table->timestamp('first_seen_at')->nullable();
-            $table->timestamp('last_seen_at')->nullable();
+            // first_seen_at/last_seen_at removed - use created_at/updated_at instead
             $table->timestamps();
 
             $table->unique(['customer_id', 'identity_id']);

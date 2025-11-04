@@ -2,6 +2,7 @@
 
 namespace App\Http\Services;
 
+use App\Jobs\ProcessEventIngestion;
 use App\Models\IngestionToken;
 use App\Models\Website;
 use Carbon\Carbon;
@@ -13,9 +14,10 @@ use Illuminate\Support\Str;
 class TrackingIngestionService
 {
     /**
-     * Ingest a tracking event.
+     * Ingest event: Check idempotency and queue processing job.
+     * All processing (including event storage) happens in the queue worker.
      *
-     * @return array{event_id: int, customer_id: int|null, session_id: int|null}
+     * @return array{event_id: int|null}
      */
     public function ingestEvent(
         Website $website,
@@ -30,28 +32,147 @@ class TrackingIngestionService
             'idempotency_key' => $eventData['idempotency_key'] ?? null,
         ]);
 
-        return DB::transaction(function () use ($website, $ingestionToken, $eventData, $ip, $userAgent) {
+        // Check idempotency synchronously to prevent duplicate jobs
+        $idempotencyKey = $eventData['idempotency_key'];
+        $existing = DB::table('events')
+            ->where('idempotency_key', $idempotencyKey)
+            ->first();
+
+        if ($existing) {
+            Log::debug('Event already exists (idempotency)', [
+                'event_id' => $existing->id,
+                'idempotency_key' => $idempotencyKey,
+            ]);
+            return [
+                'event_id' => $existing->id,
+            ];
+        }
+
+        // Queue the job - it will handle everything: storage + processing
+        ProcessEventIngestion::dispatch(
+            eventId: null, // Will be created by the job
+            websiteId: $website->id,
+            ingestionTokenId: $ingestionToken->id,
+            eventData: $eventData,
+            ip: $ip,
+            userAgent: $userAgent
+        );
+
+        Log::debug('Event queued for processing', [
+            'idempotency_key' => $idempotencyKey,
+        ]);
+
+        return [
+            'event_id' => null, // Will be available after job processes
+        ];
+    }
+
+    /**
+     * Store event with minimal processing (fast path).
+     * Only performs idempotency check and stores the event.
+     *
+     * @return int The event ID
+     */
+    protected function storeEventFast(
+        Website $website,
+        IngestionToken $ingestionToken,
+        array $eventData
+    ): int {
+        $idempotencyKey = $eventData['idempotency_key'];
+
+        // Check for existing event (idempotency)
+        $existing = DB::table('events')
+            ->where('idempotency_key', $idempotencyKey)
+            ->first();
+
+        if ($existing) {
+            Log::debug('Event already exists (idempotency)', [
+                'event_id' => $existing->id,
+                'idempotency_key' => $idempotencyKey,
+            ]);
+            return $existing->id;
+        }
+
+        // Note: session_id is now required, but we'll need to create/get session first
+        // For now, throw an error if session_id is not provided
+        // This method should only be called after session is created
+        throw new \RuntimeException('storeEventFast requires a session_id. Use processEventAsync instead.');
+    }
+
+    /**
+     * Process event asynchronously - handles everything in the queue worker.
+     * Creates event if eventId is null, then processes everything:
+     * - Event storage (if needed)
+     * - Customer resolution
+     * - Session management
+     * - Touch attribution
+     * - Conversion handling
+     * - UTM normalization
+     */
+    public function processEventAsync(
+        ?int $eventId,
+        Website $website,
+        IngestionToken $ingestionToken,
+        array $eventData,
+        string $ip,
+        ?string $userAgent
+    ): void {
+        Log::debug('Starting async event processing', [
+            'event_id' => $eventId,
+            'website_id' => $website->id,
+            'event' => $eventData['event'] ?? null,
+        ]);
+
+        DB::transaction(function () use (&$eventId, $website, $ingestionToken, $eventData, $ip, $userAgent) {
             try {
+                // Check idempotency first (if eventId is provided, use it; otherwise check by key)
+                $idempotencyKey = $eventData['idempotency_key'];
+                if ($eventId) {
+                    $existing = DB::table('events')->find($eventId);
+                    if ($existing && $existing->idempotency_key !== $idempotencyKey) {
+                        Log::warning('Event ID provided but idempotency key mismatch', [
+                            'event_id' => $eventId,
+                            'expected_key' => $idempotencyKey,
+                            'actual_key' => $existing->idempotency_key,
+                        ]);
+                    }
+                } else {
+                    // Check idempotency by key (race condition protection in queue)
+                    $existing = DB::table('events')
+                        ->where('idempotency_key', $idempotencyKey)
+                        ->first();
+                    
+                    if ($existing) {
+                        Log::debug('Event already exists (idempotency check in queue)', [
+                            'event_id' => $existing->id,
+                            'idempotency_key' => $idempotencyKey,
+                        ]);
+                        $eventId = $existing->id;
+                    }
+                }
+
                 // 1. Resolve identity and customer
-                Log::debug('Step 1: Resolving customer');
+                Log::debug('Step 1: Resolving customer', ['event_id' => $eventId]);
                 $customer = $this->resolveCustomer($website, $eventData, $ip, $userAgent);
                 Log::debug('Customer resolved', [
+                    'event_id' => $eventId,
                     'customer_id' => $customer?->id ?? null,
                 ]);
 
                 // 2. Normalize UTM parameters (all UTM params use custom UTM system) and acquisition data
-                Log::debug('Step 2: Normalizing UTM parameters and acquisition data');
+                Log::debug('Step 2: Normalizing UTM parameters and acquisition data', ['event_id' => $eventId]);
                 $customUtmValues = $this->normalizeCustomUtmParameters($website, $eventData);
                 $referrerDomain = $this->normalizeReferrerDomain($website, $eventData['referrer'] ?? null);
                 $landingPage = $this->normalizeLandingPage($website, $eventData['url'] ?? null);
                 Log::debug('UTM and acquisition data normalized', [
+                    'event_id' => $eventId,
                     'custom_utm_value_ids' => $customUtmValues,
                     'referrer_domain_id' => $referrerDomain,
                     'landing_page_id' => $landingPage,
                 ]);
 
-                // 3. Sessionize (find or create session)
-                Log::debug('Step 3: Resolving session');
+                // 3. Sessionize (find or create session) - REQUIRED for event creation
+                Log::debug('Step 3: Resolving session', ['event_id' => $eventId]);
                 $session = $this->resolveSession(
                     website: $website,
                     customer: $customer,
@@ -62,12 +183,68 @@ class TrackingIngestionService
                     ip: $ip,
                     userAgent: $userAgent,
                 );
+                
+                if (!$session) {
+                    Log::error('Cannot create event without session', [
+                        'website_id' => $website->id,
+                        'customer_id' => $customer?->id,
+                    ]);
+                    return;
+                }
+                
                 Log::debug('Session resolved', [
-                    'session_id' => $session?->id ?? null,
+                    'event_id' => $eventId,
+                    'session_id' => $session->id,
                 ]);
 
-                // 4. Create or update touch if this is a new acquisition touchpoint
-                Log::debug('Step 4: Resolving touch');
+                // 4. Create event if it doesn't exist yet (now that we have session_id)
+                if (!$eventId) {
+                    $occurredAt = isset($eventData['timestamp']) 
+                        ? Carbon::parse($eventData['timestamp']) 
+                        : now();
+                    
+                    $eventId = DB::table('events')->insertGetId([
+                        'website_id' => $website->id,
+                        'session_id' => $session->id, // Required
+                        'customer_id' => $customer?->id,
+                        'name' => $eventData['event'],
+                        'occurred_at' => $occurredAt,
+                        'props' => json_encode($eventData['properties'] ?? []),
+                        'revenue_cents' => isset($eventData['revenue']) 
+                            ? (int) round($eventData['revenue'] * 100) 
+                            : null,
+                        'currency' => $eventData['currency'] ?? null,
+                        'idempotency_key' => $idempotencyKey,
+                        'ingestion_token_id' => $ingestionToken->id,
+                        'referrer_domain_id' => $referrerDomain,
+                        'landing_page_id' => $landingPage,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                    
+                    Log::debug('Event created', ['event_id' => $eventId]);
+                }
+                
+                // Get the event
+                $event = DB::table('events')->find($eventId);
+                if (!$event) {
+                    Log::error('Event not found after creation', ['event_id' => $eventId]);
+                    return;
+                }
+
+                // 5. Link custom UTM values to event
+                Log::debug('Step 5: Linking UTM values to event', ['event_id' => $eventId]);
+                $this->linkCustomUtmValuesToEvent($eventId, $customUtmValues);
+
+                // 6. Update event with any additional resolved data
+                if ($customer && !$event->customer_id) {
+                    DB::table('events')
+                        ->where('id', $eventId)
+                        ->update(['customer_id' => $customer->id, 'updated_at' => now()]);
+                }
+
+                // 7. Create or update touch if this is a new acquisition touchpoint
+                Log::debug('Step 7: Resolving touch', ['event_id' => $eventId]);
                 $touch = $this->resolveTouch(
                     website: $website,
                     customer: $customer,
@@ -78,29 +255,13 @@ class TrackingIngestionService
                     landingPage: $landingPage,
                 );
                 Log::debug('Touch resolved', [
+                    'event_id' => $eventId,
                     'touch_id' => $touch?->id ?? null,
                 ]);
 
-                // 5. Create event with idempotency check
-                Log::debug('Step 5: Creating event');
-                $event = $this->createEvent(
-                    website: $website,
-                    customer: $customer,
-                    session: $session,
-                    ingestionToken: $ingestionToken,
-                    eventData: $eventData,
-                    customUtmValues: $customUtmValues,
-                    referrerDomain: $referrerDomain,
-                    landingPage: $landingPage,
-                    touch: $touch,
-                );
-                Log::debug('Event created', [
-                    'event_id' => $event->id ?? null,
-                ]);
-
-                // 6. Handle conversion attribution if this is a conversion event
+                // 8. Handle conversion attribution if this is a conversion event
                 if ($this->isConversionEvent($eventData['event'])) {
-                    Log::debug('Step 6: Creating conversion');
+                    Log::debug('Step 8: Creating conversion', ['event_id' => $eventId]);
                     $this->createConversion(
                         website: $website,
                         customer: $customer,
@@ -108,20 +269,17 @@ class TrackingIngestionService
                         event: $event,
                         eventData: $eventData,
                     );
-                    Log::debug('Conversion created');
+                    Log::debug('Conversion created', ['event_id' => $eventId]);
                 }
 
-                $result = [
-                    'event_id' => $event->id,
+                Log::debug('Async event processing completed successfully', [
+                    'event_id' => $eventId,
                     'customer_id' => $customer?->id,
                     'session_id' => $session?->id,
-                ];
-
-                Log::debug('Event ingestion completed successfully', $result);
-
-                return $result;
+                ]);
             } catch (\Exception $e) {
-                Log::error('Error during event ingestion', [
+                Log::error('Error during async event processing', [
+                    'event_id' => $eventId,
                     'website_id' => $website->id,
                     'event' => $eventData['event'] ?? null,
                     'error' => $e->getMessage(),
@@ -133,6 +291,8 @@ class TrackingIngestionService
             }
         });
     }
+
+    // updateEvent method removed - event is now created with all required data upfront
 
     /**
      * Resolve customer from identity data.
@@ -179,8 +339,6 @@ class TrackingIngestionService
                 'website_id' => $website->id,
                 'type' => $identityType,
                 'value_hash' => $identityValueHash,
-                'first_seen_at' => now(),
-                'last_seen_at' => now(),
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -188,7 +346,7 @@ class TrackingIngestionService
         } else {
             DB::table('identities')
                 ->where('id', $identity->id)
-                ->update(['last_seen_at' => now(), 'updated_at' => now()]);
+                ->update(['updated_at' => now()]);
         }
 
         // Find customer linked to this identity
@@ -211,7 +369,7 @@ class TrackingIngestionService
                 
                 DB::table('customers')
                     ->where('id', $customer->id)
-                    ->update(['last_seen_at' => now(), 'updated_at' => now()]);
+                    ->update(['updated_at' => now()]);
                 return $customer;
             }
         }
@@ -227,15 +385,13 @@ class TrackingIngestionService
                     'identity_id' => $identity->id,
                     'confidence' => 0.95, // High confidence for email_hash
                     'source' => 'heuristic',
-                    'first_seen_at' => now(),
-                    'last_seen_at' => now(),
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
                 
                 DB::table('customers')
                     ->where('id', $customerByEmail->id)
-                    ->update(['last_seen_at' => now(), 'updated_at' => now()]);
+                    ->update(['updated_at' => now()]);
                 
                 return $customerByEmail;
             }
@@ -252,8 +408,6 @@ class TrackingIngestionService
                 'identity_id' => $identity->id,
                 'confidence' => 0.7, // Lower confidence for IP-based linking
                 'source' => 'heuristic',
-                'first_seen_at' => now(),
-                'last_seen_at' => now(),
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -267,7 +421,7 @@ class TrackingIngestionService
             
             DB::table('customers')
                 ->where('id', $existingCustomer->id)
-                ->update(['last_seen_at' => now(), 'updated_at' => now()]);
+                ->update(['updated_at' => now()]);
             
             return $existingCustomer;
         }
@@ -275,8 +429,6 @@ class TrackingIngestionService
         // Create new customer
         $customerData = [
             'website_id' => $website->id,
-            'first_seen_at' => now(),
-            'last_seen_at' => now(),
             'status' => 'active',
             'created_at' => now(),
             'updated_at' => now(),
@@ -308,8 +460,6 @@ class TrackingIngestionService
             'identity_id' => $identity->id,
             'confidence' => $confidence,
             'source' => $source,
-            'first_seen_at' => now(),
-            'last_seen_at' => now(),
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -334,7 +484,7 @@ class TrackingIngestionService
 
         // Look for recent sessions (within last 2 hours) with the same IP
         // This handles cases where cookies are cleared but user is still on same device/IP
-        $recentSession = DB::table('sessions_tracking')
+        $recentSession = DB::table('tracking_sessions')
             ->where('website_id', $website->id)
             ->where('ip', $ip)
             ->where('started_at', '>', now()->subHours(2))
@@ -359,7 +509,7 @@ class TrackingIngestionService
                 ->join('identities', 'customer_identity_links.identity_id', '=', 'identities.id')
                 ->where('customer_identity_links.customer_id', $customer->id)
                 ->where('identities.type', 'cookie')
-                ->where('identities.last_seen_at', '>', now()->subMinutes(30))
+                ->where('identities.updated_at', '>', now()->subMinutes(30))
                 ->exists();
 
             // If no recent cookie identity, link the new cookie to this customer
@@ -451,7 +601,6 @@ class TrackingIngestionService
                     $customUtmParamId = DB::table('custom_utm_parameters')->insertGetId([
                         'website_id' => $website->id,
                         'name' => $paramName,
-                        'first_seen_at' => now(),
                         'created_at' => now(),
                         'updated_at' => now(),
                     ]);
@@ -461,16 +610,13 @@ class TrackingIngestionService
                 // Find or create custom UTM value
                 $customUtmValue = DB::table('custom_utm_values')
                     ->where('custom_utm_parameter_id', $customUtmParam->id)
-                    ->where('website_id', $website->id)
                     ->where('value', $value)
                     ->first();
 
                 if (!$customUtmValue) {
                     $customUtmValueId = DB::table('custom_utm_values')->insertGetId([
                         'custom_utm_parameter_id' => $customUtmParam->id,
-                        'website_id' => $website->id,
                         'value' => $value,
-                        'first_seen_at' => now(),
                         'created_at' => now(),
                         'updated_at' => now(),
                     ]);
@@ -508,7 +654,6 @@ class TrackingIngestionService
                 'website_id' => $website->id,
                 'domain' => $domain,
                 'category' => $this->categorizeReferrer($domain),
-                'first_seen_at' => now(),
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -528,22 +673,17 @@ class TrackingIngestionService
 
         $parsed = parse_url($url);
         $path = $parsed['path'] ?? '/';
-        $query = $parsed['query'] ?? '';
-        $queryHash = $query ? hash('sha256', $query) : '';
 
         $landingPage = DB::table('landing_pages')
             ->where('website_id', $website->id)
             ->where('path', $path)
-            ->where('query_hash', $queryHash)
             ->first();
 
         if (!$landingPage) {
             return DB::table('landing_pages')->insertGetId([
                 'website_id' => $website->id,
                 'path' => $path,
-                'query_hash' => $queryHash,
                 'full_url_sample' => strlen($url) > 500 ? substr($url, 0, 500) : $url,
-                'first_seen_at' => now(),
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -568,7 +708,7 @@ class TrackingIngestionService
         $sessionId = $eventData['session_id'] ?? null;
         
         if ($sessionId) {
-            $session = DB::table('sessions_tracking')
+            $session = DB::table('tracking_sessions')
                 ->where('id', $sessionId)
                 ->where('website_id', $website->id)
                 ->first();
@@ -585,7 +725,7 @@ class TrackingIngestionService
         }
 
         // Check if there's an active session within timeout (30 minutes default)
-        $activeSession = DB::table('sessions_tracking')
+        $activeSession = DB::table('tracking_sessions')
             ->where('website_id', $website->id)
             ->where('customer_id', $customer->id)
             ->whereNull('ended_at')
@@ -600,7 +740,7 @@ class TrackingIngestionService
         }
 
         // Create new session
-        $sessionId = DB::table('sessions_tracking')->insertGetId([
+        $sessionId = DB::table('tracking_sessions')->insertGetId([
             'website_id' => $website->id,
             'customer_id' => $customer->id,
             'started_at' => Carbon::parse($eventData['timestamp'] ?? now()),
@@ -619,7 +759,7 @@ class TrackingIngestionService
         // Link custom UTM values to session
         $this->linkCustomUtmValuesToSession($sessionId, $customUtmValues);
 
-        return DB::table('sessions_tracking')->find($sessionId);
+        return DB::table('tracking_sessions')->find($sessionId);
     }
 
     /**
@@ -627,7 +767,7 @@ class TrackingIngestionService
      */
     protected function shouldBreakSession(object $session): bool
     {
-        // Note: UTM parameters are not stored in sessions_tracking table
+        // Note: UTM parameters are not stored in tracking_sessions table
         // Session breaks are handled by timeout and referrer changes
         // For now, we don't break sessions based on UTM changes
         return false;
@@ -724,72 +864,12 @@ class TrackingIngestionService
     }
 
     /**
-     * Create event with idempotency check.
-     */
-    protected function createEvent(
-        Website $website,
-        ?object $customer,
-        ?object $session,
-        IngestionToken $ingestionToken,
-        array $eventData,
-        array $customUtmValues,
-        ?int $referrerDomain,
-        ?int $landingPage,
-        ?object $touch
-    ): object {
-        $idempotencyKey = $eventData['idempotency_key'];
-
-        // Check for existing event
-        $existing = DB::table('event_dedup_keys')
-            ->where('idempotency_key', $idempotencyKey)
-            ->first();
-
-        if ($existing) {
-            // Link custom UTM values to existing event (in case of duplicates with different UTM params)
-            $this->linkCustomUtmValuesToEvent($existing->event_id, $customUtmValues);
-            return DB::table('events')->find($existing->event_id);
-        }
-
-        $occurredAt = $eventData['timestamp'] 
-            ? Carbon::parse($eventData['timestamp']) 
-            : now();
-
-        $eventId = DB::table('events')->insertGetId([
-            'website_id' => $website->id,
-            'session_id' => $session?->id,
-            'customer_id' => $customer?->id,
-            'name' => $eventData['event'],
-            'occurred_at' => $occurredAt,
-            'props' => json_encode($eventData['properties'] ?? []),
-            'revenue_cents' => isset($eventData['revenue']) 
-                ? (int) round($eventData['revenue'] * 100) 
-                : null,
-            'currency' => $eventData['currency'] ?? null,
-            'idempotency_key' => $idempotencyKey,
-            'ingestion_token_id' => $ingestionToken->id,
-            'schema_version' => $eventData['schema_version'] ?? 1,
-            'sdk_version' => $eventData['sdk_version'] ?? null,
-            'referrer_domain_id' => $referrerDomain,
-            'landing_page_id' => $landingPage,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-
-        // Record idempotency key
-        DB::table('event_dedup_keys')->insert([
-            'idempotency_key' => $idempotencyKey,
-            'event_id' => $eventId,
-            'created_at' => now(),
-        ]);
-
-        // Link custom UTM values to event
-        $this->linkCustomUtmValuesToEvent($eventId, $customUtmValues);
-
-        return DB::table('events')->find($eventId);
-    }
-
-    /**
      * Create conversion with attribution.
+     * 
+     * Attribution priority:
+     * 1. Current UTM (from URL) - highest priority
+     * 2. Last Touch UTM (from cookies/customer) - fallback
+     * 3. First Touch UTM (from cookies/customer) - final fallback
      */
     protected function createConversion(
         Website $website,
@@ -802,24 +882,67 @@ class TrackingIngestionService
             return;
         }
 
-        // Find first and last non-direct touch
-        $firstTouch = DB::table('touches')
-            ->where('website_id', $website->id)
-            ->where('customer_id', $customer->id)
-            ->orderBy('occurred_at', 'asc')
-            ->first();
+        // Extract current UTMs from event data (if present in URL)
+        $utmCurrent = $this->extractCurrentUtms($eventData);
 
-        // Find last non-direct touch by checking if there are custom UTM values or referrer
-        // Note: Standard UTM parameters are not stored in touches table
-        // We'll check for custom UTM values via junction table
+        // Get touches for attribution calculation
+        // Note: We don't store first/last touch UTMs as JSON - they can be queried from touches
+        $firstTouch = null;
+        if ($customer->first_touch_id) {
+        $firstTouch = DB::table('touches')
+                ->where('id', $customer->first_touch_id)
+            ->where('website_id', $website->id)
+            ->first();
+        }
+
+        $lastTouch = null;
+        if ($customer->last_touch_id) {
+            $lastTouch = DB::table('touches')
+                ->where('id', $customer->last_touch_id)
+                ->where('website_id', $website->id)
+                ->first();
+        }
+
+        // Calculate attribution UTMs based on priority:
+        // 1. Current UTM (if present) - from purchase URL
+        // 2. Last Touch UTM (if no current) - query from touch
+        // 3. First Touch UTM (if no current or last) - query from touch
+        $utmAttribution = null;
+        if ($utmCurrent) {
+            $utmAttribution = $utmCurrent;
+        } elseif ($lastTouch) {
+            $utmAttribution = $this->getUtmsFromTouch($lastTouch->id);
+        } elseif ($firstTouch) {
+            $utmAttribution = $this->getUtmsFromTouch($firstTouch->id);
+        }
+
+        // Extract order information from event properties
+        $properties = $eventData['properties'] ?? [];
+        $orderId = isset($properties['order_id']) ? (int) $properties['order_id'] : null;
+        $orderNumber = $properties['order_number'] ?? $properties['order_key'] ?? null;
+
+        // Also find last non-direct touch for compatibility with existing attribution model
         $lastNonDirectTouch = DB::table('touches')
             ->where('website_id', $website->id)
             ->where('customer_id', $customer->id)
-            ->whereNotNull('referrer_domain_id') // Non-direct (has referrer)
+            ->whereNotNull('referrer_domain_id')
             ->orderBy('occurred_at', 'desc')
             ->first();
 
-        $attributedTouch = $lastNonDirectTouch ?? $firstTouch;
+        // Determine attributed touch for backward compatibility
+        // If current UTMs exist, try to find a touch from the current session
+        // Otherwise, use last touch or first touch
+        $attributedTouch = null;
+        if ($utmCurrent && $session) {
+            // Try to find a touch from the current session
+            $currentSessionTouch = DB::table('touches')
+                ->where('session_id', $session->id)
+                ->where('website_id', $website->id)
+                ->first();
+            $attributedTouch = $currentSessionTouch ?? $lastTouch ?? $firstTouch;
+        } else {
+            $attributedTouch = $lastTouch ?? $firstTouch;
+        }
 
         DB::table('conversions')->insert([
             'website_id' => $website->id,
@@ -833,6 +956,10 @@ class TrackingIngestionService
             'last_non_direct_touch_id' => $lastNonDirectTouch?->id,
             'attributed_touch_id' => $attributedTouch?->id,
             'attribution_model' => 'last_non_direct',
+            'utm_current' => $utmCurrent ? json_encode($utmCurrent) : null,
+            'utm_attribution' => $utmAttribution ? json_encode($utmAttribution) : null,
+            'order_id' => $orderId,
+            'order_number' => $orderNumber,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -840,10 +967,14 @@ class TrackingIngestionService
 
     /**
      * Check if event is a conversion event.
+     * 
+     * Only tracks actual completed orders/purchases as conversions.
+     * Note: checkout_completed is intentionally excluded to avoid duplicate
+     * conversions, as it may fire before payment confirmation.
      */
     protected function isConversionEvent(string $eventName): bool
     {
-        $conversionEvents = ['purchase', 'order', 'conversion', 'checkout_completed'];
+        $conversionEvents = ['purchase', 'order', 'conversion'];
         return in_array(strtolower($eventName), $conversionEvents);
     }
 
@@ -873,7 +1004,7 @@ class TrackingIngestionService
     }
 
     /**
-     * Link custom UTM values to session via junction table.
+     * Link custom UTM values to session via polymorphic table.
      */
     protected function linkCustomUtmValuesToSession(int $sessionId, array $customUtmValueIds): void
     {
@@ -883,14 +1014,16 @@ class TrackingIngestionService
 
         foreach ($customUtmValueIds as $customUtmValueId) {
             // Check if link already exists
-            $existing = DB::table('session_custom_utm_values')
-                ->where('session_id', $sessionId)
+            $existing = DB::table('trackable_utm_values')
+                ->where('trackable_type', 'session')
+                ->where('trackable_id', $sessionId)
                 ->where('custom_utm_value_id', $customUtmValueId)
                 ->first();
 
             if (!$existing) {
-                DB::table('session_custom_utm_values')->insert([
-                    'session_id' => $sessionId,
+                DB::table('trackable_utm_values')->insert([
+                    'trackable_type' => 'session',
+                    'trackable_id' => $sessionId,
                     'custom_utm_value_id' => $customUtmValueId,
                     'created_at' => now(),
                     'updated_at' => now(),
@@ -900,7 +1033,7 @@ class TrackingIngestionService
     }
 
     /**
-     * Link custom UTM values to event via junction table.
+     * Link custom UTM values to event via polymorphic table.
      */
     protected function linkCustomUtmValuesToEvent(int $eventId, array $customUtmValueIds): void
     {
@@ -910,14 +1043,16 @@ class TrackingIngestionService
 
         foreach ($customUtmValueIds as $customUtmValueId) {
             // Check if link already exists
-            $existing = DB::table('event_custom_utm_values')
-                ->where('event_id', $eventId)
+            $existing = DB::table('trackable_utm_values')
+                ->where('trackable_type', 'event')
+                ->where('trackable_id', $eventId)
                 ->where('custom_utm_value_id', $customUtmValueId)
                 ->first();
 
             if (!$existing) {
-                DB::table('event_custom_utm_values')->insert([
-                    'event_id' => $eventId,
+                DB::table('trackable_utm_values')->insert([
+                    'trackable_type' => 'event',
+                    'trackable_id' => $eventId,
                     'custom_utm_value_id' => $customUtmValueId,
                     'created_at' => now(),
                     'updated_at' => now(),
@@ -927,7 +1062,7 @@ class TrackingIngestionService
     }
 
     /**
-     * Link custom UTM values to touch via junction table.
+     * Link custom UTM values to touch via polymorphic table.
      */
     protected function linkCustomUtmValuesToTouch(int $touchId, array $customUtmValueIds): void
     {
@@ -937,20 +1072,89 @@ class TrackingIngestionService
 
         foreach ($customUtmValueIds as $customUtmValueId) {
             // Check if link already exists
-            $existing = DB::table('touch_custom_utm_values')
-                ->where('touch_id', $touchId)
+            $existing = DB::table('trackable_utm_values')
+                ->where('trackable_type', 'touch')
+                ->where('trackable_id', $touchId)
                 ->where('custom_utm_value_id', $customUtmValueId)
                 ->first();
 
             if (!$existing) {
-                DB::table('touch_custom_utm_values')->insert([
-                    'touch_id' => $touchId,
+                DB::table('trackable_utm_values')->insert([
+                    'trackable_type' => 'touch',
+                    'trackable_id' => $touchId,
                     'custom_utm_value_id' => $customUtmValueId,
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
             }
         }
+    }
+
+    /**
+     * Extract current UTMs from event data (from URL).
+     * Checks both top-level event data and parses URL for UTM parameters.
+     * 
+     * @return array<string, string>|null Associative array of UTM parameters (e.g., ['utm_source' => 'google', 'utm_campaign' => 'summer'])
+     */
+    protected function extractCurrentUtms(array $eventData): ?array
+    {
+        $utms = [];
+        
+        // 1. Check top-level event data for UTM parameters
+        foreach ($eventData as $key => $value) {
+            if (str_starts_with($key, 'utm_') && is_string($value) && !empty($value)) {
+                $utms[$key] = $value;
+            }
+        }
+        
+        // 2. If no UTMs found in top-level data, try parsing from URL
+        if (empty($utms) && !empty($eventData['url'])) {
+            $url = $eventData['url'];
+            $parsedUrl = parse_url($url);
+            
+            if (isset($parsedUrl['query'])) {
+                parse_str($parsedUrl['query'], $queryParams);
+                
+                foreach ($queryParams as $key => $value) {
+                    if (str_starts_with($key, 'utm_') && is_string($value) && !empty($value)) {
+                        $utms[$key] = $value;
+                    }
+                }
+            }
+        }
+        
+        return !empty($utms) ? $utms : null;
+    }
+
+    /**
+     * Get UTMs from a touch by querying through the junction table.
+     * 
+     * @param int $touchId The touch ID
+     * @return array<string, string>|null Associative array of UTM parameters
+     */
+    protected function getUtmsFromTouch(int $touchId): ?array
+    {
+        $utms = [];
+        
+        // Get all custom UTM values linked to this touch via polymorphic table
+        $touchUtmValues = DB::table('trackable_utm_values')
+            ->where('trackable_type', 'touch')
+            ->where('trackable_id', $touchId)
+            ->join('custom_utm_values', 'trackable_utm_values.custom_utm_value_id', '=', 'custom_utm_values.id')
+            ->join('custom_utm_parameters', 'custom_utm_values.custom_utm_parameter_id', '=', 'custom_utm_parameters.id')
+            ->select(
+                'custom_utm_parameters.name as param_name',
+                'custom_utm_values.value as param_value'
+            )
+            ->get();
+        
+        foreach ($touchUtmValues as $touchUtmValue) {
+            // Reconstruct the UTM parameter name with 'utm_' prefix
+            $utmKey = 'utm_' . $touchUtmValue->param_name;
+            $utms[$utmKey] = $touchUtmValue->param_value;
+        }
+        
+        return !empty($utms) ? $utms : null;
     }
 
     /**

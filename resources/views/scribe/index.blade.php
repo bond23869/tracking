@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta content="IE=edge,chrome=1" http-equiv="X-UA-Compatible">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <title>tracking API Documentation</title>
+    <title>CrumbTracker API Documentation</title>
 
     <link href="https://fonts.googleapis.com/css?family=Open+Sans&display=swap" rel="stylesheet">
 
@@ -91,7 +91,7 @@
     </ul>
 
     <ul class="toc-footer" id="last-updated">
-        <li>Last updated: November 3, 2025</li>
+        <li>Last updated: November 4, 2025</li>
     </ul>
 </div>
 
@@ -164,7 +164,7 @@ access-control-allow-origin: *
 
 <code class="language-json" style="max-height: 300px;">{
     &quot;status&quot;: &quot;ok&quot;,
-    &quot;timestamp&quot;: &quot;2025-11-03T08:58:43+00:00&quot;
+    &quot;timestamp&quot;: &quot;2025-11-04T13:57:50+00:00&quot;
 }</code>
  </pre>
     </span>
@@ -402,9 +402,7 @@ You can check the Dev Tools console for debugging information.</code></pre>
     \"revenue\": 63,
     \"currency\": \"roy\",
     \"idempotency_key\": \"jpxmqesedyghenqcopwvo\",
-    \"timestamp\": \"2025-11-03T08:58:43\",
-    \"schema_version\": 79,
-    \"sdk_version\": \"nkbamlnfngefbeilfzsyu\"
+    \"timestamp\": \"2025-11-04T13:57:50\"
 }"
 </code></pre></div>
 
@@ -437,9 +435,7 @@ let body = {
     "revenue": 63,
     "currency": "roy",
     "idempotency_key": "jpxmqesedyghenqcopwvo",
-    "timestamp": "2025-11-03T08:58:43",
-    "schema_version": 79,
-    "sdk_version": "nkbamlnfngefbeilfzsyu"
+    "timestamp": "2025-11-04T13:57:50"
 };
 
 fetch(url, {
@@ -737,34 +733,10 @@ Must be one of:
  &nbsp;
                 <input type="text" style="display: none"
                               name="timestamp"                data-endpoint="POSTapi-tracking-events"
-               value="2025-11-03T08:58:43"
+               value="2025-11-04T13:57:50"
                data-component="body">
     <br>
-<p>Must be a valid date. Example: <code>2025-11-03T08:58:43</code></p>
-        </div>
-                <div style=" padding-left: 28px;  clear: unset;">
-            <b style="line-height: 2;"><code>schema_version</code></b>&nbsp;&nbsp;
-<small>integer</small>&nbsp;
-<i>optional</i> &nbsp;
- &nbsp;
-                <input type="number" style="display: none"
-               step="any"               name="schema_version"                data-endpoint="POSTapi-tracking-events"
-               value="79"
-               data-component="body">
-    <br>
-<p>Must be at least 1. Example: <code>79</code></p>
-        </div>
-                <div style=" padding-left: 28px;  clear: unset;">
-            <b style="line-height: 2;"><code>sdk_version</code></b>&nbsp;&nbsp;
-<small>string</small>&nbsp;
-<i>optional</i> &nbsp;
- &nbsp;
-                <input type="text" style="display: none"
-                              name="sdk_version"                data-endpoint="POSTapi-tracking-events"
-               value="nkbamlnfngefbeilfzsyu"
-               data-component="body">
-    <br>
-<p>Must not be greater than 50 characters. Example: <code>nkbamlnfngefbeilfzsyu</code></p>
+<p>Must be a valid date. Example: <code>2025-11-04T13:57:50</code></p>
         </div>
         </form>
 

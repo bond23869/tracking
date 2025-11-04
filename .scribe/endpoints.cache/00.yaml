@@ -32,7 +32,7 @@ endpoints:
       -
         custom: []
         status: 200
-        content: '{"status":"ok","timestamp":"2025-11-03T08:58:43+00:00"}'
+        content: '{"status":"ok","timestamp":"2025-11-04T13:57:50+00:00"}'
         headers:
           cache-control: 'no-cache, private'
           content-type: application/json
@@ -302,29 +302,7 @@ endpoints:
         name: timestamp
         description: 'Must be a valid date.'
         required: false
-        example: '2025-11-03T08:58:43'
-        type: string
-        enumValues: []
-        exampleWasSpecified: false
-        nullable: true
-        deprecated: false
-      schema_version:
-        custom: []
-        name: schema_version
-        description: 'Must be at least 1.'
-        required: false
-        example: 79
-        type: integer
-        enumValues: []
-        exampleWasSpecified: false
-        nullable: false
-        deprecated: false
-      sdk_version:
-        custom: []
-        name: sdk_version
-        description: 'Must not be greater than 50 characters.'
-        required: false
-        example: nkbamlnfngefbeilfzsyu
+        example: '2025-11-04T13:57:50'
         type: string
         enumValues: []
         exampleWasSpecified: false
@@ -347,9 +325,7 @@ endpoints:
       revenue: 63
       currency: roy
       idempotency_key: jpxmqesedyghenqcopwvo
-      timestamp: '2025-11-03T08:58:43'
-      schema_version: 79
-      sdk_version: nkbamlnfngefbeilfzsyu
+      timestamp: '2025-11-04T13:57:50'
     fileParameters: []
     responses: []
     responseFields: []

@@ -16,8 +16,7 @@ return new class extends Migration
             $table->foreignId('website_id')->constrained()->onDelete('cascade');
             $table->string('type'); // cookie, user_id, email_hash, ga_cid, etc.
             $table->string('value_hash');
-            $table->timestamp('first_seen_at')->nullable();
-            $table->timestamp('last_seen_at')->nullable();
+            // first_seen_at/last_seen_at removed - use created_at/updated_at instead
             $table->timestamps();
 
             $table->unique(['website_id', 'type', 'value_hash'], 'identities_site_type_value_unique');
